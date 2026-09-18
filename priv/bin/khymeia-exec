@@ -1,0 +1,71 @@
+#!/bin/sh
+# khymeia-exec — runs one harness process on behalf of a Khymeia session.
+#
+# Usage: /bin/sh khymeia-exec <executable> [args...]
+#
+# Erlang ports cannot close a child's stdin, cannot read stderr separately and
+# do not kill the child when the port closes. This wrapper fixes all three:
+#
+#   * the harness gets /dev/null as stdin, so CLIs that read piped stdin
+#     (e.g. `codex exec`) never block waiting for EOF;
+#   * every output line is tagged: "o <line>" for stdout, "e <line>" for stderr;
+#   * when Khymeia closes the port (or the VM dies) our stdin hits EOF and the
+#     harness receives SIGTERM, then SIGKILL after a grace period.
+#
+# The wrapper exits with the harness exit status. Arguments are passed as argv,
+# never interpolated into a shell string.
+
+set -u
+
+[ "$#" -ge 1 ] || { echo "usage: khymeia-exec <executable> [args...]" >&2; exit 64; }
+
+grace="${KHYMEIA_KILL_GRACE_SECONDS:-5}"
+dir=$(mktemp -d "${TMPDIR:-/tmp}/khymeia-exec.XXXXXX") || exit 70
+out="$dir/stdout"
+err="$dir/stderr"
+mkfifo "$out" "$err" || { rm -rf "$dir"; exit 70; }
+
+# Keep a handle on the port pipe: asynchronous lists get /dev/null as stdin.
+exec 3<&0
+# The wrapper's own diagnostics (e.g. job "Terminated" notices) are noise.
+exec 2>/dev/null
+# FIFO plumbing, arranged so that no open(2) can ever block and no output is
+# lost, whatever order the processes start or die in:
+#   fds 4/5 — read-write handles held by the wrapper until the harness exits,
+#             so readers never see a premature EOF and writers never block;
+#   fds 6/7 — read ends opened here (not blocking thanks to 4/5) and handed to
+#             the taggers, so data written before a tagger runs is not lost.
+exec 4<>"$out" 5<>"$err"
+exec 6<"$out" 7<"$err"
+
+awk '{ print "o " $0; fflush() }' <&6 3<&- 4>&- 5>&- 6<&- 7<&- &
+tag_out=$!
+awk '{ print "e " $0; fflush() }' <&7 3<&- 4>&- 5>&- 6<&- 7<&- &
+tag_err=$!
+exec 6<&- 7<&-
+
+"$@" < /dev/null > "$out" 2> "$err" 3<&- 4>&- 5>&- &
+child=$!
+
+# Helpers must not inherit our stdout: the port reports the exit status only
+# once every holder of that pipe has closed it.
+(
+  while read -r _ <&3; do :; done
+  kill -TERM "$child" 2>/dev/null || exit 0
+  sleep "$grace"
+  kill -KILL "$child" 2>/dev/null
+) > /dev/null 4>&- 5>&- &
+watcher=$!
+
+wait "$child"
+status=$?
+exec 4>&- 5>&-
+
+# Something the harness left behind may still hold its stdout; don't let that
+# keep the turn open forever.
+( sleep 2; kill "$tag_out" "$tag_err" ) > /dev/null 3<&- &
+reaper=$!
+wait "$tag_out" "$tag_err" 2>/dev/null
+kill "$watcher" "$reaper" 2>/dev/null
+rm -rf "$dir"
+exit "$status"

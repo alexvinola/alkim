@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "khymeia",
+      "runtimeExecutable": "mix",
+      "runtimeArgs": [
+        "phx.server"
+      ],
+      "port": 4777
+    }
+  ]
+}

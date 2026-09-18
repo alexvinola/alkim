@@ -1,0 +1,118 @@
+#!/bin/sh
+# khymeia-fake-harness — a deterministic stand-in for a coding agent CLI.
+#
+# Used by Khymeia.Harness.Fake for demos and tests. It never touches the
+# workspace; it only prints lines and exits.
+#
+# Usage: khymeia-fake-harness [--scenario S] [--delay SECONDS] [--resume REF] -- PROMPT
+#
+# Scenarios:
+#   success | stream | failure | hang       generic behaviour
+#   ask-advisor | ask-human                  implementer asking Khymeia for help
+#   advise                                   advisor answering
+#   audit-pass | audit-findings              auditor verdicts
+#   audit-fix-once                           findings on audit round 1, pass later
+#   (on --resume every scenario acknowledges the message and exits 0)
+#
+# Output protocol (one event per line, stdout):
+#   ref <id>        conversation reference, usable with --resume
+#   say <text>      assistant message
+#   tool <text>     tool invocation
+#   anything else   plain output
+
+scenario=success
+delay=0.4
+resume=""
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --scenario) scenario="$2"; shift 2 ;;
+    --delay) delay="$2"; shift 2 ;;
+    --resume) resume="$2"; shift 2 ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+done
+
+prompt="$*"
+
+findings() {
+  echo 'say <khymeia:audit>{"status":"findings","findings":[{"severity":"high","title":"Missing input validation","description":"User input reaches the query unchecked.","file":"lib/app.ex","line":12},{"severity":"low","title":"Typo in docs","description":"recieve -> receive"}]}</khymeia:audit>'
+}
+
+if [ -n "$resume" ]; then
+  echo "ref $resume"
+  sleep "$delay"
+  echo "say Continuing conversation $resume."
+  sleep "$delay"
+  echo "say You said: $prompt"
+  exit 0
+fi
+
+ref="fake-$$-$(date +%s)"
+echo "ref $ref"
+sleep "$delay"
+
+case "$scenario" in
+  success)
+    echo "say Reading the workspace to understand the request."
+    sleep "$delay"
+    echo "tool read_file README.md"
+    sleep "$delay"
+    echo "say Done. (This is the fake harness: nothing was changed.)"
+    exit 0
+    ;;
+  stream)
+    i=1
+    while [ "$i" -le 20 ]; do
+      echo "step $i/20: simulated work on \"$prompt\""
+      i=$((i + 1))
+      sleep "$delay"
+    done
+    echo "say Streaming finished."
+    exit 0
+    ;;
+  failure)
+    echo "say Trying something that will not work."
+    sleep "$delay"
+    echo "fatal: simulated harness failure" >&2
+    exit 3
+    ;;
+  ask-advisor)
+    echo "say I need a second opinion first."
+    echo 'say <khymeia:ask-advisor reason="architecture">Should the cache be a GenServer or ETS?</khymeia:ask-advisor>'
+    exit 0
+    ;;
+  ask-human)
+    echo 'say <khymeia:ask-human>Should the new endpoint be public?</khymeia:ask-human>'
+    exit 0
+    ;;
+  advise)
+    echo "say Recommendation: use ETS owned by a GenServer."
+    exit 0
+    ;;
+  audit-pass)
+    echo "tool read_file lib/app.ex"
+    echo 'say Looks good. <khymeia:audit>{"status":"passed","findings":[]}</khymeia:audit>'
+    exit 0
+    ;;
+  audit-fix-once)
+    case "$prompt" in
+      *"Audit round: 1"*) findings ;;
+      *) echo 'say Fixed. <khymeia:audit>{"status":"passed","findings":[]}</khymeia:audit>' ;;
+    esac
+    exit 0
+    ;;
+  audit-findings)
+    findings
+    exit 0
+    ;;
+  hang)
+    echo "say Working on a very long task..."
+    while :; do sleep 1; done
+    ;;
+  *)
+    echo "unknown scenario: $scenario" >&2
+    exit 64
+    ;;
+esac
