@@ -26,7 +26,7 @@ defmodule KhymeiaWeb.Layouts do
 
   """
   attr :flash, :map, required: true, doc: "the map of flash messages"
-  attr :active, :atom, default: nil, doc: "the active nav item (:dashboard | :new)"
+  attr :active, :atom, default: nil, doc: "the active nav item (:dashboard | :new | :providers)"
   slot :inner_block, required: true
 
   def app(assigns) do
@@ -41,6 +41,9 @@ defmodule KhymeiaWeb.Layouts do
           <.link navigate={~p"/"} aria-current={@active == :dashboard && "page"}>Sessions</.link>
           <.link navigate={~p"/sessions/new"} aria-current={@active == :new && "page"}>
             New session
+          </.link>
+          <.link navigate={~p"/providers"} aria-current={@active == :providers && "page"}>
+            Providers
           </.link>
           <span class="k-runtime" title="LiveView connection to the local runtime">
             <span class="k-dot"></span>

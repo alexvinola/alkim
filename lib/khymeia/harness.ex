@@ -33,7 +33,20 @@ defmodule Khymeia.Harness do
           required(:executable) => String.t(),
           required(:model) => String.t() | nil,
           required(:permission_mode) => String.t() | nil,
-          required(:resume) => String.t() | nil
+          required(:resume) => String.t() | nil,
+          optional(:provider) => provider() | nil
+        }
+
+  @typedoc """
+  A resolved provider profile (see `Khymeia.Providers`): where model
+  inference goes instead of the harness default. `secret` is only ever
+  placed in the harness process environment.
+  """
+  @type provider :: %{
+          kind: atom(),
+          settings: %{String.t() => String.t()},
+          secret: String.t() | nil,
+          name: String.t()
         }
 
   @typedoc """
@@ -76,7 +89,10 @@ defmodule Khymeia.Harness do
   """
   @callback list_models(executable :: String.t()) :: {:ok, [model()]} | :error
 
-  @optional_callbacks list_models: 1
+  @doc "Provider kinds (`Khymeia.Providers.Profile`) this adapter can target."
+  @callback provider_kinds() :: [atom()]
+
+  @optional_callbacks list_models: 1, provider_kinds: 0
 
   @doc "Adapters enabled in this installation (see `config :khymeia, :harness_adapters`)."
   @spec adapters() :: [module()]

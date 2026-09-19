@@ -161,6 +161,9 @@ defmodule KhymeiaWeb.SessionLive do
               <dt>Workspace</dt>
               <dd class="k-mono">{short_path(@session.workspace)}</dd>
             </div>
+            <div :if={@session.metadata["provider"]}>
+              <dt>Provider</dt><dd>{@session.metadata["provider"]}</dd>
+            </div>
             <div>
               <dt>Model</dt><dd>{@session.model || "Default / configured in harness"}</dd>
             </div>

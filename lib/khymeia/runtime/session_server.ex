@@ -41,6 +41,7 @@ defmodule Khymeia.Runtime.SessionServer do
       :retention,
       :owner,
       :owner_ref,
+      :provider_profile,
       buffer: [],
       events: [],
       event_count: 0,
@@ -82,7 +83,8 @@ defmodule Khymeia.Runtime.SessionServer do
       turn_timeout: Keyword.get(opts, :turn_timeout, config(:turn_timeout, :infinity)),
       retention: Keyword.get(opts, :retention, config(:session_retention_ms, :timer.minutes(30))),
       owner: owner,
-      owner_ref: owner && Process.monitor(owner)
+      owner_ref: owner && Process.monitor(owner),
+      provider_profile: Keyword.get(opts, :provider_profile)
     }
 
     {:ok, state, {:continue, :start}}
@@ -220,7 +222,11 @@ defmodule Khymeia.Runtime.SessionServer do
       resume: resume
     }
 
-    with {:ok, launch} <- state.adapter.build_command(turn),
+    # The provider's secret is resolved per turn and only ever placed in the
+    # harness process environment.
+    with {:ok, provider} <- resolve_provider(state.provider_profile),
+         turn = Map.put(turn, :provider, provider),
+         {:ok, launch} <- state.adapter.build_command(turn),
          {:ok, port} <- OSProcess.open(launch, session.workspace) do
       os_pid = OSProcess.os_pid(port)
       first_turn? = session.turns == 0
@@ -242,10 +248,15 @@ defmodule Khymeia.Runtime.SessionServer do
         else: emit(state, :resumed, %{os_pid: os_pid, turn: session.turns})
     else
       {:error, reason} ->
-        error = "could not start harness: #{inspect(reason)}"
+        error =
+          "could not start harness: #{if is_binary(reason), do: reason, else: inspect(reason)}"
+
         state |> emit(:output, %{kind: :error, text: error}) |> finish(:failed, %{error: error})
     end
   end
+
+  defp resolve_provider(nil), do: {:ok, nil}
+  defp resolve_provider(profile_id), do: Khymeia.Providers.resolve(profile_id)
 
   defp turn_finished(%State{stopping?: true} = state, _code), do: state
 

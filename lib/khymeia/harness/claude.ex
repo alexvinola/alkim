@@ -101,6 +101,9 @@ defmodule Khymeia.Harness.Claude do
   end
 
   @impl true
+  def provider_kinds, do: [:bedrock, :foundry, :vertex]
+
+  @impl true
   def build_command(turn) do
     args =
       ["-p", "--output-format", "stream-json", "--verbose"] ++
@@ -111,8 +114,80 @@ defmodule Khymeia.Harness.Claude do
 
     # Claude Code refuses to start when it believes it is nested inside
     # another Claude Code session (e.g. Khymeia launched from its terminal).
-    {:ok, %{executable: turn.executable, args: args, env: [{"CLAUDECODE", false}]}}
+    env = [{"CLAUDECODE", false}] ++ provider_env(turn[:provider])
+    {:ok, %{executable: turn.executable, args: args, env: env}}
   end
+
+  # Documented in Claude Code's "Amazon Bedrock", "Microsoft Foundry" and
+  # "Google Vertex AI" guides. The other providers' switches are unset so an
+  # inherited variable can never route a profile to the wrong cloud.
+  @switches ~w(CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_MANTLE CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_USE_VERTEX)
+
+  defp provider_env(nil), do: []
+
+  defp provider_env(%{kind: kind, settings: s, secret: secret}) do
+    {switch, vars} =
+      case kind do
+        :bedrock ->
+          {"CLAUDE_CODE_USE_BEDROCK",
+           [{"AWS_REGION", s["region"]}, {"ANTHROPIC_BEDROCK_BASE_URL", s["base_url"]}] ++
+             aws_credentials(secret, s["aws_profile"])}
+
+        :foundry ->
+          {"CLAUDE_CODE_USE_FOUNDRY",
+           [
+             {"ANTHROPIC_FOUNDRY_RESOURCE", s["resource"]},
+             {"ANTHROPIC_FOUNDRY_BASE_URL", s["base_url"]},
+             # Without a key Claude Code uses the Azure default credential chain.
+             {"ANTHROPIC_FOUNDRY_API_KEY", secret}
+           ]}
+
+        :vertex ->
+          {"CLAUDE_CODE_USE_VERTEX",
+           [
+             {"ANTHROPIC_VERTEX_PROJECT_ID", s["project_id"]},
+             {"CLOUD_ML_REGION", s["region"]},
+             {"GOOGLE_APPLICATION_CREDENTIALS", s["credentials_file"]}
+           ]}
+      end
+
+    Enum.map(@switches -- [switch], &{&1, false}) ++
+      [{switch, "1"}] ++ for({k, v} <- vars, v != nil and v != "", do: {k, v})
+  end
+
+  @doc false
+  # AWS credentials for a profile, shared with the Codex adapter. Explicit
+  # credentials always clear the others: inherited AWS_* variables would
+  # otherwise silently win over the chosen profile (the SDK checks the
+  # environment first) and route the session to a different account.
+  def aws_credentials(
+        %{access_key_id: id, secret_access_key: key, session_token: token},
+        _profile
+      ) do
+    [
+      {"AWS_ACCESS_KEY_ID", id},
+      {"AWS_SECRET_ACCESS_KEY", key},
+      {"AWS_SESSION_TOKEN", token || false},
+      {"AWS_PROFILE", false},
+      {"AWS_BEARER_TOKEN_BEDROCK", false}
+    ]
+  end
+
+  def aws_credentials(bearer, _profile) when is_binary(bearer),
+    do: [{"AWS_BEARER_TOKEN_BEDROCK", bearer} | clear_aws_keys()]
+
+  def aws_credentials(nil, profile) when is_binary(profile),
+    do: [{"AWS_PROFILE", profile}, {"AWS_BEARER_TOKEN_BEDROCK", false} | clear_aws_keys()]
+
+  # Ambient without a named profile: whatever the environment provides.
+  def aws_credentials(nil, nil), do: []
+
+  defp clear_aws_keys,
+    do: [
+      {"AWS_ACCESS_KEY_ID", false},
+      {"AWS_SECRET_ACCESS_KEY", false},
+      {"AWS_SESSION_TOKEN", false}
+    ]
 
   @impl true
   def parse_output(:stderr, line), do: [{:stderr, line}]
@@ -128,6 +203,17 @@ defmodule Khymeia.Harness.Claude do
     ref = if id = event["session_id"], do: [{:harness_ref, id}], else: []
     model = if model = event["model"], do: [{:system, "model #{model}"}], else: []
     ref ++ model
+  end
+
+  # Retries are how a misconfigured provider (wrong resource, region,
+  # credentials) shows up, so they are surfaced instead of ignored.
+  defp parse_event(%{"type" => "system", "subtype" => "api_retry"} = event) do
+    status = if event["error_status"], do: "HTTP #{event["error_status"]}, ", else: ""
+
+    [
+      {:system,
+       "API retry #{event["attempt"]}/#{event["max_retries"]} (#{status}#{event["error"] || "error"})"}
+    ]
   end
 
   defp parse_event(%{"type" => "assistant", "message" => %{"content" => content}})

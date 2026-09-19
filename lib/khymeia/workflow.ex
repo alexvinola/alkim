@@ -195,7 +195,7 @@ defmodule Khymeia.Workflow do
                                                                         {roles, errors, notes} ->
         spec = stringify(requested[Atom.to_string(role_id)] || %{})
         default = defaults[role_id]
-        harness = if Map.has_key?(spec, "harness"), do: spec["harness"], else: default.harness
+        harness = if Map.has_key?(spec, "harness"), do: spec["harness"], else: default.choice
 
         model =
           if Map.has_key?(spec, "model"), do: blank_to_nil(spec["model"]), else: default.model
@@ -228,14 +228,16 @@ defmodule Khymeia.Workflow do
   defp assign_role(role_id, nil, _model, _mode, _definition, _ws, _task),
     do: {:error, "no installed harness can play the #{role_id} role"}
 
-  defp assign_role(role_id, harness, model, mode, definition, workspace, task) do
+  defp assign_role(role_id, choice, model, mode, definition, workspace, task) do
+    {harness, profile_id} = Khymeia.Providers.parse_choice(choice)
+
     with {:ok, adapter} <- Khymeia.Harness.fetch_adapter(to_string(harness)),
          {:ok, available} <- Discovery.fetch_available(adapter.id()) do
       tier = get_in(definition.roles, [role_id, :tier])
       role = Role.assign(role_id, available.id, model, mode, available.capabilities, tier)
 
       request = %{
-        harness: available.id,
+        harness: to_string(choice),
         workspace: workspace,
         prompt: task,
         model: role.model,
@@ -243,7 +245,15 @@ defmodule Khymeia.Workflow do
       }
 
       case Runtime.validate_request(request) do
-        {:ok, _} ->
+        {:ok, params} ->
+          # A provider profile may supply the model (e.g. a deployment name).
+          role = %{
+            role
+            | model: params.model,
+              profile_id: profile_id && params.profile.id,
+              provider: params.profile && Khymeia.Providers.Profile.label(params.profile)
+          }
+
           note =
             if role.enforcement == :none,
               do:

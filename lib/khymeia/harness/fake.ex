@@ -22,7 +22,7 @@ defmodule Khymeia.Harness.Fake do
 
   alias Khymeia.Harness.Capabilities
 
-  @scenarios ~w(success stream failure hang ask-advisor ask-human advise audit-pass audit-findings audit-fix-once)
+  @scenarios ~w(success stream failure hang ask-advisor ask-human advise audit-pass audit-findings audit-fix-once whoami)
 
   @impl true
   def id, do: :fake
@@ -51,6 +51,9 @@ defmodule Khymeia.Harness.Fake do
   end
 
   @impl true
+  def provider_kinds, do: [:demo]
+
+  @impl true
   def build_command(turn) do
     scenario = if turn.model in @scenarios, do: turn.model, else: "success"
     delay = Application.get_env(:khymeia, __MODULE__, []) |> Keyword.get(:delay, "0.4")
@@ -60,7 +63,21 @@ defmodule Khymeia.Harness.Fake do
       [turn.executable, "--scenario", scenario, "--delay", delay] ++
         resume ++ ["--", turn.prompt]
 
-    {:ok, %{executable: "/bin/sh", args: args}}
+    env =
+      case turn[:provider] do
+        nil ->
+          []
+
+        # Only presence is ever reported by the script, never the value.
+        %{secret: %{access_key_id: id}} = p ->
+          [{"FAKE_PROVIDER", p.name}, {"FAKE_PROVIDER_SECRET", id}]
+
+        p ->
+          [{"FAKE_PROVIDER", p.name}] ++
+            if(p.secret, do: [{"FAKE_PROVIDER_SECRET", p.secret}], else: [])
+      end
+
+    {:ok, %{executable: "/bin/sh", args: args, env: env}}
   end
 
   @impl true

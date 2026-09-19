@@ -48,7 +48,8 @@ if System.get_env("KHYMEIA_ENABLE_FAKE_HARNESS") in ~w(true 1) do
   config :khymeia, harness_adapters: Enum.uniq(adapters ++ [Khymeia.Harness.Fake])
 end
 
-# KHYMEIA_TIER_FAST=claude:sonnet, KHYMEIA_TIER_AUDIT=codex, ...
+# KHYMEIA_TIER_FAST=claude:sonnet, KHYMEIA_TIER_AUDIT=codex@azure-prod:my-deployment
+# (harness[@provider profile name][:model])
 tiers =
   for {"KHYMEIA_TIER_" <> name, value} <- System.get_env(), value != "", into: %{} do
     {harness, model} =
@@ -57,8 +58,14 @@ tiers =
         [harness] -> {harness, nil}
       end
 
+    {harness, profile} =
+      case String.split(harness, "@", parts: 2) do
+        [harness, profile] -> {harness, profile}
+        [harness] -> {harness, nil}
+      end
+
     {name |> String.downcase() |> String.to_atom(),
-     %{harness: String.to_atom(harness), model: model}}
+     %{harness: String.to_atom(harness), model: model, profile: profile}}
   end
 
 if tiers != %{} do

@@ -96,11 +96,16 @@ defmodule Khymeia.Harness.Codex do
   end
 
   @impl true
+  def provider_kinds, do: [:azure_openai, :bedrock]
+
+  @impl true
   def build_command(turn) do
+    {provider_args, env} = provider(turn[:provider])
+
     options =
       ["--json"] ++
         if(turn.model in [nil, ""], do: [], else: ["-m", turn.model]) ++
-        sandbox(turn.permission_mode)
+        sandbox(turn.permission_mode) ++ provider_args
 
     args =
       case turn.resume do
@@ -108,8 +113,45 @@ defmodule Khymeia.Harness.Codex do
         ref -> ["exec", "resume"] ++ options ++ ["--", ref, turn.prompt]
       end
 
-    {:ok, %{executable: turn.executable, args: args}}
+    {:ok, %{executable: turn.executable, args: args, env: env}}
   end
+
+  # Providers are configured with `-c` overrides, so the user's
+  # ~/.codex/config.toml is never modified. Values were validated as plain
+  # (no quotes or backslashes) before they get here.
+  @azure_key_env "KHYMEIA_AZURE_OPENAI_API_KEY"
+
+  defp provider(nil), do: {[], []}
+
+  # Azure OpenAI / Foundry: the documented custom provider with the v1
+  # Responses API. Codex reads the key from the variable named in env_key.
+  defp provider(%{kind: :azure_openai, settings: s, secret: secret}) do
+    args =
+      config("model_provider", "khymeia_azure") ++
+        config("model_providers.khymeia_azure.name", "Azure OpenAI (Khymeia)") ++
+        config("model_providers.khymeia_azure.base_url", String.trim_trailing(s["base_url"], "/")) ++
+        config("model_providers.khymeia_azure.env_key", @azure_key_env) ++
+        config("model_providers.khymeia_azure.wire_api", "responses")
+
+    {args, if(secret, do: [{@azure_key_env, secret}], else: [])}
+  end
+
+  # Amazon Bedrock: Codex's built-in `amazon-bedrock` provider, using the AWS
+  # credential chain (profile) and region.
+  # With access keys (from the Keychain) the SDK reads them from the
+  # environment, so no profile is passed.
+  defp provider(%{kind: :bedrock, settings: s, secret: secret}) do
+    profile = if is_map(secret), do: nil, else: s["aws_profile"]
+
+    args =
+      config("model_provider", "amazon-bedrock") ++
+        config("model_providers.amazon-bedrock.aws.region", s["region"]) ++
+        if(profile, do: config("model_providers.amazon-bedrock.aws.profile", profile), else: [])
+
+    {args, Khymeia.Harness.Claude.aws_credentials(secret, profile)}
+  end
+
+  defp config(key, value), do: ["-c", ~s(#{key}="#{value}")]
 
   defp sandbox(mode) when mode in ["read-only", "workspace-write"],
     do: ["-c", ~s(sandbox_mode="#{mode}")]
@@ -144,6 +186,8 @@ defmodule Khymeia.Harness.Codex do
 
   defp parse_event(%{"type" => "error"} = event), do: [{:error, event["message"] || "error"}]
   defp parse_event(_event), do: []
+
+  defp parse_item(%{"type" => "error", "message" => message}), do: [{:error, message}]
 
   defp parse_item(%{"type" => "agent_message", "text" => text}),
     do: [{:message, :assistant, text}]

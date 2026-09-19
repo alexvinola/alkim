@@ -27,6 +27,9 @@ config :khymeia,
 
 config :khymeia, Khymeia.Harness.Fake, delay: "0.05"
 
+# Never touch the developer's real Keychain from tests.
+config :khymeia, secrets_backend: Khymeia.MemorySecrets
+
 # Print only warnings and errors during test
 config :logger, level: :warning
 

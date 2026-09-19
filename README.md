@@ -43,7 +43,7 @@ its "model" (`success`, `stream`, `failure`, `hang`) and watch the session
 stream, wait for input, fail or get stopped.
 
 ```bash
-mix test           # 106 tests, no real harness required
+mix test           # 130 tests, no real harness required
 ```
 
 Port 4777 was chosen to stay clear of the usual 3000/4000/5000/8080 dev ports;
@@ -311,6 +311,86 @@ a restart. Runs left active by a previous process are marked failed
 - Harness-native structured output (Claude's `--json-schema`, Codex's
   `--output-schema`) could replace the tagged blocks per adapter later.
 
+## Cloud providers (Bedrock, Foundry, Vertex, Azure OpenAI)
+
+A **provider profile** runs an installed harness against your own cloud
+instead of its default backend. The harness still runs **locally** — agent
+loop, tools, permissions, your files — and only model inference goes to the
+provider, which bills it. Khymeia never calls a provider itself and does not
+become an agent: it only starts the same CLI with the configuration each
+CLI documents.
+
+| Harness → provider | How Khymeia configures it (per the CLI's docs) |
+|---|---|
+| Claude Code → Amazon Bedrock | `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, `AWS_PROFILE`, optional `ANTHROPIC_BEDROCK_BASE_URL`, optional `AWS_BEARER_TOKEN_BEDROCK` |
+| Claude Code → Microsoft Foundry | `CLAUDE_CODE_USE_FOUNDRY=1`, `ANTHROPIC_FOUNDRY_RESOURCE` or `ANTHROPIC_FOUNDRY_BASE_URL`, `ANTHROPIC_FOUNDRY_API_KEY` or Entra ID (Azure default credential, e.g. `az login`) |
+| Claude Code → Google Vertex AI | `CLAUDE_CODE_USE_VERTEX=1`, `ANTHROPIC_VERTEX_PROJECT_ID`, `CLOUD_ML_REGION`, optional `GOOGLE_APPLICATION_CREDENTIALS` |
+| Codex → Azure OpenAI / Foundry | `-c model_provider="khymeia_azure"` + `model_providers.khymeia_azure.{base_url,env_key,wire_api="responses"}` (v1 API, `…/openai/v1`); API key only — Codex has no Entra ID support |
+| Codex → Amazon Bedrock | `-c model_provider="amazon-bedrock"` + `model_providers.amazon-bedrock.aws.{region,profile}` (AWS credential chain) |
+
+Codex is configured with `-c` overrides, so `~/.codex/config.toml` is never
+touched. When a Claude Code profile is active, the switches of the other
+providers are explicitly unset for that process.
+
+Create profiles at **Providers** (`/providers`). A profile then appears as a
+harness choice everywhere — "Claude Code · Microsoft Foundry · my-resource"
+in New session, and per role in workflows (e.g. implementer on Bedrock,
+auditor on Azure OpenAI). Workflow tiers can name one:
+`KHYMEIA_TIER_AUDIT=codex@azure-prod:my-deployment`.
+
+**Credentials are never stored by Khymeia.** A profile records *how* to get
+one:
+
+- **ambient** — the provider SDK's own chain: AWS profile/SSO, `az login`,
+  gcloud Application Default Credentials;
+- **environment variable** — the name of a variable in Khymeia's own
+  environment (a `brew services` daemon does not see your shell exports);
+- **macOS Keychain** — the key you paste is written to your Keychain
+  (service `khymeia`) via `security -i` on stdin, so it never appears in a
+  process's arguments. It is read when each turn starts (rotation needs no
+  restart) and placed only in the harness process environment — never in
+  the database, events, logs or the UI;
+- **AWS access keys in the Keychain** (Bedrock) — access key ID, secret
+  access key and optional session token typed in a form instead of editing
+  `~/.aws/credentials`; passed as `AWS_ACCESS_KEY_ID` /
+  `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`. Khymeia never writes to your
+  AWS files. Prefer an IAM user limited to Bedrock, or SSO profiles.
+
+Every stored credential can be removed at any time (**Forget credential**,
+or deleting the profile). With a named AWS profile, inherited
+`AWS_ACCESS_KEY_ID`/`AWS_BEARER_TOKEN_BEDROCK` variables are cleared for the
+harness, because the AWS SDK would otherwise prefer them over the profile
+and silently use another account.
+
+The Providers page runs **local readiness checks only** (variable set, key in
+Keychain, AWS profile present, gcloud credentials file…) — no network call,
+no cost. The only real test is a session.
+
+**Models** are the provider's identifiers: Bedrock model/inference-profile
+IDs or ARNs, Foundry/Azure deployment names. They are not listed (that would
+need cloud management calls); a profile can carry a default. Foundry (Claude)
+and all Codex profiles need one, because the harness defaults don't exist
+there.
+
+Limitations:
+
+- Not verified against live Bedrock/Foundry/Vertex/Azure accounts (none was
+  available). Verified: each CLI accepts the generated configuration and
+  routes to the configured provider, probed with unreachable endpoints and
+  AWS's published example credentials. Both CLIs load access keys from the
+  environment (Codex's request was rejected by AWS with 401, as expected
+  for fake keys).
+- Codex's Bedrock provider calls Bedrock's OpenAI-compatible endpoint
+  (`bedrock-mantle.<region>.api.aws/openai/v1/responses`), so its model must
+  be one served there (e.g. `openai.gpt-oss-120b-1:0`); Claude models on
+  Bedrock go through Claude Code.
+- `env` settings in `~/.claude/settings.json` (e.g. written by Claude Code's
+  `/setup-bedrock` wizard) also apply to Claude Code; keep provider settings
+  in one place to avoid surprises.
+- The Keychain option is macOS-only; elsewhere use an environment variable.
+- Some Claude Code features depend on the provider (e.g. WebSearch is not
+  available on Bedrock).
+
 ## Harness adapters
 
 Each adapter implements `Khymeia.Harness`:
@@ -476,6 +556,8 @@ lib/khymeia/
   runtime/
     supervisor.ex  session_supervisor.ex  session_server.ex
     crash_monitor.ex  registry.ex  event.ex  event_bus.ex  os_process.ex
+  providers.ex                provider profiles (context)
+  providers/  profile.ex  secrets.ex  keychain.ex
   sessions.ex                 persistence context
   sessions/session_record.ex  Ecto schema
 lib/khymeia_web/

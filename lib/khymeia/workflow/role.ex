@@ -42,6 +42,9 @@ defmodule Khymeia.Workflow.Role do
     :model,
     :permission_mode,
     :tier,
+    # Optional provider profile (see Khymeia.Providers) and its label.
+    :profile_id,
+    :provider,
     permissions: %{read: true, write: false},
     enforcement: :none
   ]
@@ -52,6 +55,8 @@ defmodule Khymeia.Workflow.Role do
           model: String.t() | nil,
           permission_mode: String.t() | nil,
           tier: atom() | nil,
+          profile_id: String.t() | nil,
+          provider: String.t() | nil,
           permissions: %{read: boolean(), write: boolean()},
           enforcement: :sandbox | :harness | :none | :not_applicable
         }
@@ -130,6 +135,8 @@ defmodule Khymeia.Workflow.Role do
       "model" => r.model,
       "permission_mode" => r.permission_mode,
       "tier" => r.tier && Atom.to_string(r.tier),
+      "profile_id" => r.profile_id,
+      "provider" => r.provider,
       "write" => r.permissions.write,
       "enforcement" => Atom.to_string(r.enforcement)
     }
@@ -137,18 +144,23 @@ defmodule Khymeia.Workflow.Role do
 
   ## Tiers
 
-  @doc "Configured tiers: `%{tier => %{harness: atom, model: String.t() | nil}}`."
+  @doc """
+  Configured tiers: `%{tier => %{harness: atom, model: String.t() | nil,
+  profile: String.t() | nil}}` — `profile` names a provider profile.
+  """
   def tiers, do: Application.get_env(:khymeia, :workflow_tiers, %{})
 
   @doc """
-  Default harness/model for a tier, restricted to available harnesses. Falls
-  back to the first available harness with the model left to the harness.
+  Default harness choice/model for a tier, restricted to available
+  harnesses. `choice` is the harness id, or `"harness@profile_id"` when the
+  tier names an existing provider profile. Falls back to the first available
+  harness with the model left to the harness.
   """
   def default_for(tier, available_harness_ids) do
     case Map.get(tiers(), tier) do
       %{harness: harness} = spec ->
         if harness in available_harness_ids,
-          do: %{harness: harness, model: spec[:model]},
+          do: %{harness: harness, choice: choice(harness, spec[:profile]), model: spec[:model]},
           else: fallback(available_harness_ids)
 
       _ ->
@@ -156,6 +168,15 @@ defmodule Khymeia.Workflow.Role do
     end
   end
 
-  defp fallback([first | _]), do: %{harness: first, model: nil}
-  defp fallback([]), do: %{harness: nil, model: nil}
+  defp choice(harness, nil), do: Atom.to_string(harness)
+
+  defp choice(harness, profile_name) do
+    case Enum.find(Khymeia.Providers.list(), &(&1.name == profile_name and &1.harness == harness)) do
+      nil -> Atom.to_string(harness)
+      profile -> "#{harness}@#{profile.id}"
+    end
+  end
+
+  defp fallback([first | _]), do: %{harness: first, choice: Atom.to_string(first), model: nil}
+  defp fallback([]), do: %{harness: nil, choice: nil, model: nil}
 end

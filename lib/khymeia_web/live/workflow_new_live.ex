@@ -19,6 +19,7 @@ defmodule KhymeiaWeb.WorkflowNewLive do
   @impl true
   def mount(_params, _session, socket) do
     harnesses = Enum.filter(Runtime.harnesses(), &(&1.status == :available))
+    options = Enum.reject(KhymeiaWeb.HarnessOptions.build(harnesses), & &1.disabled)
     preset = hd(Enum.filter(Presets.all(), &(&1.name == "coding-with-audit")) ++ Presets.all())
 
     params = %{
@@ -35,6 +36,7 @@ defmodule KhymeiaWeb.WorkflowNewLive do
      |> assign(
        page_title: "New workflow · Khymeia",
        harnesses: harnesses,
+       options: options,
        presets: Presets.all(),
        errors: %{}
      )
@@ -108,10 +110,10 @@ defmodule KhymeiaWeb.WorkflowNewLive do
   defp default_roles(preset) do
     preset
     |> Workflow.default_roles()
-    |> Map.new(fn {role, %{harness: harness, model: model}} ->
+    |> Map.new(fn {role, %{choice: choice, model: model}} ->
       {Atom.to_string(role),
        %{
-         "harness" => (harness && Atom.to_string(harness)) || "",
+         "harness" => choice || "",
          "model" => model || "",
          "custom_model" => "",
          "permission_mode" => ""
@@ -194,7 +196,7 @@ defmodule KhymeiaWeb.WorkflowNewLive do
             role={role}
             tier={get_in(@preset.roles, [role, :tier])}
             spec={@params["roles"][Atom.to_string(role)] || %{}}
-            harnesses={@harnesses}
+            options={@options}
             error={@errors[:"role_#{role}"]}
           />
         </div>
@@ -239,16 +241,19 @@ defmodule KhymeiaWeb.WorkflowNewLive do
   attr :role, :atom, required: true
   attr :tier, :atom, default: nil
   attr :spec, :map, required: true
-  attr :harnesses, :list, required: true
+  attr :options, :list, required: true
   attr :error, :string, default: nil
 
   defp role_row(assigns) do
-    harness = Enum.find(assigns.harnesses, &(Atom.to_string(&1.id) == assigns.spec["harness"]))
+    option = KhymeiaWeb.HarnessOptions.find(assigns.options, assigns.spec["harness"])
+    harness = option && option.harness
     role = harness && Role.assign(assigns.role, harness.id, nil, nil, harness.capabilities)
 
     assigns =
       assign(assigns,
+        option: option,
         harness: harness,
+        models: if(option, do: KhymeiaWeb.HarnessOptions.models(option), else: []),
         assignment: role,
         name: "workflow[roles][#{assigns.role}]"
       )
@@ -264,12 +269,8 @@ defmodule KhymeiaWeb.WorkflowNewLive do
           <option :if={@role == :advisor} value="none" selected={@spec["harness"] in ["none", ""]}>
             None — no consultations
           </option>
-          <option
-            :for={h <- @harnesses}
-            value={h.id}
-            selected={Atom.to_string(h.id) == @spec["harness"]}
-          >
-            {h.name}
+          <option :for={o <- @options} value={o.value} selected={o.value == @spec["harness"]}>
+            {o.label}
           </option>
         </select>
 
@@ -279,9 +280,13 @@ defmodule KhymeiaWeb.WorkflowNewLive do
           style="gap:.35rem"
         >
           <select name={"#{@name}[model]"} class="k-select" id={"role_#{@role}_model"}>
-            <option value="">Default / configured in harness</option>
+            <option value="">
+              {if @option.profile,
+                do: "Default / configured in provider profile",
+                else: "Default / configured in harness"}
+            </option>
             <option
-              :for={m <- @harness.models}
+              :for={m <- @models}
               value={m.id}
               selected={m.id == @spec["model"]}
               title={m.description}
@@ -291,13 +296,13 @@ defmodule KhymeiaWeb.WorkflowNewLive do
             <option
               :if={@harness.capabilities.models == :unknown}
               value="__custom__"
-              selected={@spec["model"] == "__custom__" or custom?(@spec["model"], @harness)}
+              selected={@spec["model"] == "__custom__" or custom?(@spec["model"], @models)}
             >
               Other (type a model name)…
             </option>
           </select>
           <input
-            :if={@spec["model"] == "__custom__" or custom?(@spec["model"], @harness)}
+            :if={@spec["model"] == "__custom__" or custom?(@spec["model"], @models)}
             name={"#{@name}[custom_model]"}
             value={@spec["custom_model"] || @spec["model"]}
             class="k-input k-mono"
@@ -334,8 +339,8 @@ defmodule KhymeiaWeb.WorkflowNewLive do
     """
   end
 
-  defp custom?(model, harness),
-    do: model not in [nil, "", "__custom__"] and not Enum.any?(harness.models, &(&1.id == model))
+  defp custom?(model, models),
+    do: model not in [nil, "", "__custom__"] and not Enum.any?(models, &(&1.id == model))
 
   defp blank(""), do: nil
   defp blank(value), do: value

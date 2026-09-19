@@ -82,6 +82,14 @@ defmodule Khymeia.Harness.AdaptersTest do
       assert :error = Claude.parse_model_aliases("")
     end
 
+    test "surfaces API retries (how provider misconfiguration shows up)" do
+      retry =
+        ~s({"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"error_status":403,"error":"forbidden"})
+
+      assert [{:system, "API retry 2/10 (HTTP 403, forbidden)"}] =
+               Claude.parse_output(:stdout, retry)
+    end
+
     test "unknown JSON is ignored, plain text and stderr are passed through" do
       assert [] = Claude.parse_output(:stdout, ~s({"type":"something_new"}))
       assert [{:output, "not json"}] = Claude.parse_output(:stdout, "not json")
@@ -163,6 +171,12 @@ defmodule Khymeia.Harness.AdaptersTest do
                Codex.parse_output(:stdout, ~s({"type":"turn.failed","error":{"message":"boom"}}))
 
       assert [] = Codex.parse_output(:stdout, ~s({"type":"turn.started"}))
+
+      assert [{:error, "Model metadata not found"}] =
+               Codex.parse_output(
+                 :stdout,
+                 ~s({"type":"item.completed","item":{"type":"error","message":"Model metadata not found"}})
+               )
     end
   end
 

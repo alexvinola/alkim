@@ -369,8 +369,10 @@ defmodule Khymeia.Workflow.Server do
   end
 
   defp start_role_session(state, %Role{} = role, prompt, extra_opts) do
+    harness = if role.profile_id, do: "#{role.harness}@#{role.profile_id}", else: role.harness
+
     attrs = %{
-      harness: role.harness,
+      harness: harness,
       workspace: state.run.workspace,
       prompt: prompt,
       model: role.model,

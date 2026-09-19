@@ -12,6 +12,7 @@
 #   advise                                   advisor answering
 #   audit-pass | audit-findings              auditor verdicts
 #   audit-fix-once                           findings on audit round 1, pass later
+#   whoami                                   reports the provider profile it runs with
 #   (on --resume every scenario acknowledges the message and exits 0)
 #
 # Output protocol (one event per line, stdout):
@@ -105,6 +106,11 @@ case "$scenario" in
     ;;
   audit-findings)
     findings
+    exit 0
+    ;;
+  whoami)
+    # Reports which provider profile reached the process — never the secret.
+    echo "say provider=${FAKE_PROVIDER:-none} secret=${FAKE_PROVIDER_SECRET:+present}"
     exit 0
     ;;
   hang)

@@ -158,7 +158,10 @@ defmodule KhymeiaWeb.WorkflowLive do
         <div class="k-panel k-rows" id="workflow-roles">
           <div :for={{role, spec} <- sort_roles(@run.roles)} class="k-row k-row-role">
             <span>{Role.title(String.to_existing_atom(role))}</span>
-            <span>{harness_name(spec["harness"])}</span>
+            <span>
+              {harness_name(spec["harness"])}
+              <span :if={spec["provider"]} class="k-hint">· {spec["provider"]}</span>
+            </span>
             <span class="k-mono k-muted k-truncate">{spec["model"] || "default model"}</span>
             <span class={["k-hint", spec["enforcement"] == "none" && "k-warn"]}>{permission_note(spec)}</span>
           </div>

@@ -11,7 +11,8 @@ defmodule Khymeia.Runtime do
   alias Khymeia.Harness.Discovery
   alias Khymeia.Runtime.{EventBus, Registry, SessionServer, SessionSupervisor}
 
-  @model_format ~r/\A[A-Za-z0-9][A-Za-z0-9._:\/@\[\]-]{0,127}\z/
+  # Wide enough for Bedrock inference-profile ARNs and Foundry deployment names.
+  @model_format ~r/\A[A-Za-z0-9][A-Za-z0-9._:\/@\[\]-]{0,254}\z/
   @max_prompt 100_000
 
   @type start_error ::
@@ -29,7 +30,8 @@ defmodule Khymeia.Runtime do
   Validates the request, records the session and starts its process.
 
   `attrs` (string or atom keys): `harness`, `workspace`, `prompt`, and
-  optionally `model` and `permission_mode`. Validation errors come back as
+  optionally `model` and `permission_mode`. `harness` may name a provider
+  profile as `"claude@<profile id>"` (see `Khymeia.Providers`). Validation errors come back as
   `{:error, {:invalid, %{field => message}}}`.
 
   Options: `:owner` (a pid that receives every event and whose exit stops
@@ -39,6 +41,18 @@ defmodule Khymeia.Runtime do
   def start_session(attrs, opts \\ []) do
     with {:ok, harness, params} <- prepare(attrs) do
       {metadata, opts} = Keyword.pop(opts, :metadata, %{})
+
+      metadata =
+        case params.profile do
+          nil ->
+            metadata
+
+          p ->
+            Map.merge(metadata, %{
+              "provider_profile_id" => p.id,
+              "provider" => Khymeia.Providers.Profile.label(p)
+            })
+        end
 
       session = %Session{
         id: Ecto.UUID.generate(),
@@ -51,7 +65,12 @@ defmodule Khymeia.Runtime do
       }
 
       server_opts =
-        [session: session, adapter: harness.adapter, executable: harness.executable] ++ opts
+        [
+          session: session,
+          adapter: harness.adapter,
+          executable: harness.executable,
+          provider_profile: params.profile && params.profile.id
+        ] ++ opts
 
       with {:ok, _record} <- Sessions.create(session) do
         case SessionSupervisor.start_session(server_opts) do
@@ -86,9 +105,14 @@ defmodule Khymeia.Runtime do
   defp prepare(attrs) do
     attrs = normalize(attrs)
 
-    with {:ok, harness} <- fetch_harness(attrs.harness),
-         {:ok, params} <- validate(attrs, harness) do
-      {:ok, harness, params}
+    {harness_id, profile_id} = Khymeia.Providers.parse_choice(attrs.harness)
+
+    with {:ok, harness} <- fetch_harness(harness_id),
+         {:ok, profile} <- fetch_profile(profile_id, harness),
+         attrs = apply_profile_defaults(attrs, profile),
+         {:ok, params} <- validate(attrs, harness),
+         :ok <- require_model(params, profile) do
+      {:ok, harness, Map.put(params, :profile, profile)}
     end
   end
 
@@ -217,6 +241,44 @@ defmodule Khymeia.Runtime do
         {:error, {:invalid, %{harness: "unknown or unsupported harness"}}}
     end
   end
+
+  defp fetch_profile(nil, _harness), do: {:ok, nil}
+
+  defp fetch_profile(id, harness) do
+    kinds =
+      if function_exported?(harness.adapter, :provider_kinds, 0),
+        do: harness.adapter.provider_kinds(),
+        else: []
+
+    case Khymeia.Providers.get(id) do
+      %{harness: h, kind: kind} = profile when h == harness.id ->
+        if kind in kinds,
+          do: {:ok, profile},
+          else: {:error, {:invalid, %{harness: "#{harness.name} cannot use this provider"}}}
+
+      _ ->
+        {:error, {:invalid, %{harness: "unknown provider profile"}}}
+    end
+  end
+
+  defp apply_profile_defaults(attrs, %{default_model: model}) when is_binary(model),
+    do: %{attrs | model: attrs.model || model}
+
+  defp apply_profile_defaults(attrs, _), do: attrs
+
+  defp require_model(%{model: nil}, %Khymeia.Providers.Profile{} = profile) do
+    if Khymeia.Providers.Profile.requires_model?(profile),
+      do:
+        {:error,
+         {:invalid,
+          %{
+            model:
+              "#{Khymeia.Providers.Profile.kind_label(profile.kind)} needs a model or deployment name"
+          }}},
+      else: :ok
+  end
+
+  defp require_model(_params, _profile), do: :ok
 
   defp validate(attrs, %{capabilities: capabilities}) do
     errors =

@@ -18,5 +18,6 @@ defmodule KhymeiaWeb.Router do
     live "/sessions/:id", SessionLive
     live "/workflows/new", WorkflowNewLive
     live "/workflows/:id", WorkflowLive
+    live "/providers", ProvidersLive
   end
 end

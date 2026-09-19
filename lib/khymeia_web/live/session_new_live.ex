@@ -15,15 +15,17 @@ defmodule KhymeiaWeb.SessionNewLive do
   import KhymeiaWeb.SessionComponents, only: [mode_tabs: 1]
 
   alias Khymeia.Runtime
+  alias KhymeiaWeb.HarnessOptions
 
   @impl true
   def mount(_params, _session, socket) do
     harnesses = Runtime.harnesses()
     available = Enum.filter(harnesses, &(&1.status == :available))
+    options = HarnessOptions.build(harnesses)
 
     params = %{
       "workspace" => default_workspace(),
-      "harness" => available |> List.first(%{id: nil}) |> Map.get(:id) |> to_string(),
+      "harness" => HarnessOptions.first_value(options),
       "model" => "",
       "custom_model" => "",
       "permission_mode" => "",
@@ -32,7 +34,12 @@ defmodule KhymeiaWeb.SessionNewLive do
 
     {:ok,
      socket
-     |> assign(page_title: "New session · Khymeia", harnesses: harnesses, available: available)
+     |> assign(
+       page_title: "New session · Khymeia",
+       harnesses: harnesses,
+       available: available,
+       options: options
+     )
      |> assign(errors: %{})
      |> assign_params(params)}
   end
@@ -62,12 +69,15 @@ defmodule KhymeiaWeb.SessionNewLive do
   end
 
   defp assign_params(socket, params) do
-    harness = Enum.find(socket.assigns.available, &(to_string(&1.id) == params["harness"]))
+    option = HarnessOptions.find(socket.assigns.options, params["harness"])
+    harness = option && option.harness
 
     assign(socket,
       params: params,
       form: to_form(params, as: :session),
+      option: option,
       harness: harness,
+      models: if(option, do: HarnessOptions.models(option), else: []),
       caps: harness && harness.capabilities
     )
   end
@@ -118,23 +128,28 @@ defmodule KhymeiaWeb.SessionNewLive do
             <label class="k-label" for="session_harness">Harness</label>
             <select id="session_harness" name="session[harness]" class="k-select">
               <option
-                :for={h <- @harnesses}
-                value={h.id}
-                selected={to_string(h.id) == @params["harness"]}
-                disabled={h.status != :available}
+                :for={o <- @options}
+                value={o.value}
+                selected={o.value == @params["harness"]}
+                disabled={o.disabled}
               >
-                {option_label(h)}
+                {o.label}
               </option>
             </select>
             <span :if={@errors[:harness]} class="k-error">{@errors[:harness]}</span>
+            <span :if={@option && @option.profile} class="k-hint">
+              Runs the local {@harness.name} CLI; model inference goes to {Khymeia.Providers.Profile.kind_label(
+                @option.profile.kind
+              )}.
+            </span>
           </div>
 
           <div :if={@caps && @caps.model_selection} class="k-field">
             <label class="k-label" for="session_model">Model</label>
             <select id="session_model" name="session[model]" class="k-select">
-              <option value="">Default / configured in harness</option>
+              <option value="">{default_model_label(@option)}</option>
               <option
-                :for={m <- @harness.models}
+                :for={m <- @models}
                 value={m.id}
                 selected={m.id == @params["model"]}
                 title={m.description}
@@ -159,7 +174,7 @@ defmodule KhymeiaWeb.SessionNewLive do
               autocomplete="off"
             />
             <span :if={@errors[:model]} class="k-error">{@errors[:model]}</span>
-            <span :if={@harness.models != [] and @caps.models == :unknown} class="k-hint">
+            <span :if={@models != [] and @caps.models == :unknown and !@option.profile} class="k-hint">
               Reported by the installed {@harness.name} CLI.
             </span>
           </div>
@@ -216,7 +231,11 @@ defmodule KhymeiaWeb.SessionNewLive do
   defp model_label(%{id: id, name: name}) when name in [nil, ""] or name == id, do: id
   defp model_label(%{id: id, name: name}), do: "#{name} (#{id})"
 
-  defp option_label(%{status: :available, name: name}), do: name
-  defp option_label(%{status: :not_installed, name: name}), do: "#{name} — not installed"
-  defp option_label(%{status: :no_adapter, name: name}), do: "#{name} — no adapter yet"
+  defp default_model_label(%{profile: %{} = profile}) do
+    if Khymeia.Providers.Profile.requires_model?(profile) and is_nil(profile.default_model),
+      do: "Choose a model / deployment…",
+      else: "Default / configured in provider profile"
+  end
+
+  defp default_model_label(_), do: "Default / configured in harness"
 end
