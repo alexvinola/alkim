@@ -1,228 +1,186 @@
 # Khymeia
 
-**Khymeia is a local-first runtime to supervise and coordinate the coding-agent
-harnesses you already have installed** — Claude Code, Codex, and (soon) Kiro CLI,
-GitHub Copilot CLI, OpenCode, Gemini CLI.
+[![CI](https://github.com/alexvinola/khymeia/actions/workflows/ci.yml/badge.svg)](https://github.com/alexvinola/khymeia/actions/workflows/ci.yml)
 
-It runs as a long-lived local daemon, launches harness sessions as supervised
-OTP processes, streams their output as events, and shows everything live in a
-Phoenix LiveView UI at <http://127.0.0.1:4777>.
+**A local-first runtime to supervise, coordinate and verify the coding-agent
+harnesses you already have installed** — Claude Code and Codex today, with
+Kiro CLI, GitHub Copilot CLI, OpenCode and Gemini CLI detected and planned.
 
-On top of single sessions, **workflows** coordinate several harnesses in
-roles — an *implementer* that writes code, an ephemeral *advisor* it can
-consult, and an independent read-only *auditor* whose findings loop back to
-the implementer — with Khymeia as supervisor and orchestrator
-([Workflows](#workflows)).
+Khymeia runs as a long-lived local daemon. Every agent session is a supervised
+OTP process driving the real CLI; its output streams as events into a Phoenix
+LiveView UI at <http://127.0.0.1:4777>. On top of single sessions,
+**workflows** put several harnesses to work in roles — an *implementer* that
+writes code, an *advisor* it can consult, an independent read-only *auditor*
+whose findings loop back — with a human able to step in at any checkpoint.
 
-## What Khymeia is not
+Khymeia is **not** an LLM, a model provider, a new coding agent or a
+replacement for Claude Code or Codex. It never calls model APIs itself and
+never runs an agent loop of its own: the harnesses do the reasoning, coding and
+tool use; Khymeia handles execution, coordination, state, verification and
+observability.
 
-Khymeia is **not**:
+---
 
-- an LLM, or a model provider;
-- a new coding agent, or an agent loop of its own;
-- a replacement for Claude Code or Codex.
+- [Status](#status)
+- [Quick start](#quick-start)
+- [Using Khymeia](#using-khymeia) — sessions · workflows · cloud providers
+- [Harness adapters](#harness-adapters)
+- [Architecture](#architecture)
+- [Security and trust model](#security-and-trust-model)
+- [Running as a daemon](#running-as-a-daemon)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Roadmap](#roadmap)
+- [Why Elixir](#why-elixir)
 
-It never calls model APIs and never handles credentials. Every session runs the
-real CLI you installed, with the authentication that CLI already has.
+## Status
+
+Early and moving fast, but built to be trusted with real work:
+
+| Area | State |
+|---|---|
+| Sessions with Claude Code and Codex | working, exercised end to end against the installed CLIs |
+| Workflows (implement → audit → fix loop, advisor, human checkpoints) | working; verified with Claude Code as implementer and auditor on a test repository |
+| Cloud providers (Bedrock, Foundry, Vertex, Azure OpenAI) | implemented from the CLIs' official docs; configuration accepted by the real CLIs, **not yet run against live accounts** |
+| Test suite | 130 tests, no agent CLI required ([CI](.github/workflows/ci.yml)) |
+| Packaging | OTP release works; Homebrew formula pending |
+
+Every integration is checked against the installed CLI's `--help` or its
+official documentation; what could not be verified is said so in this README
+rather than simulated.
 
 ## Quick start
 
-Requirements: Elixir ≥ 1.17 / OTP ≥ 26 on macOS or Linux, and a C compiler
-(SQLite is compiled in by `exqlite`).
+Requirements: Elixir ≥ 1.17 on OTP ≥ 26 (developed on Elixir 1.20.4 /
+OTP 29.1, see [`.tool-versions`](.tool-versions)), macOS or Linux, and a C
+compiler (SQLite is compiled in by `exqlite`).
 
 ```bash
-mix deps.get
-mix ecto.setup
-mix phx.server     # or simply: mix setup && mix phx.server
+mix setup          # deps, database, assets
+mix phx.server
 ```
 
-Open <http://127.0.0.1:4777>. The dashboard lists which harnesses were detected.
-In development a **Fake harness** is always available so you can try the whole
-runtime without any agent CLI: choose it on *New session*, pick a scenario as
-its "model" (`success`, `stream`, `failure`, `hang`) and watch the session
-stream, wait for input, fail or get stopped.
+Open <http://127.0.0.1:4777>. The dashboard lists the harnesses Khymeia found
+on your machine.
 
-```bash
-mix test           # 130 tests, no real harness required
-```
+No agent CLI? In development a **Fake harness** is always available, so the
+whole runtime can be tried without one. Choose it in *New session* and pick a
+scenario as its "model":
 
-Port 4777 was chosen to stay clear of the usual 3000/4000/5000/8080 dev ports;
-override it with `KHYMEIA_PORT`.
+| Scenario | Behaviour |
+|---|---|
+| `success`, `stream` | messages / twenty streamed lines, then waits for a follow-up |
+| `failure` | writes to stderr and exits with status 3 |
+| `hang` | never finishes — try *Stop* |
+| `ask-advisor`, `ask-human` | an implementer asking Khymeia for help (workflows) |
+| `advise`, `audit-pass`, `audit-findings`, `audit-fix-once` | advisor and auditor behaviours (workflows) |
+| `whoami` | reports which provider profile reached the process (never the secret) |
 
-## Architecture
+Port 4777 keeps clear of the usual 3000/4000/5000/8080 dev ports; change it
+with `KHYMEIA_PORT`.
 
-```text
-                 Phoenix / LiveView  (UI — never spawns processes)
-                          │
-                          ▼
-                  Khymeia.Runtime     (public API: start / stop / send / list)
-                          │
-          ┌───────────────┼───────────────────────┐
-          ▼               ▼                       ▼
-   Runtime.Registry   SessionSupervisor     Harness.Discovery
-   (id → pid, summary) (DynamicSupervisor)   (what is installed)
-                          │
-          ┌───────────────┼────────────────┐
-          ▼               ▼                ▼
-    SessionServer   SessionServer    SessionServer      one GenServer per session,
-     (Claude)         (Codex)          (Fake)           owns one Erlang Port
-          │               │                │
-          ▼               ▼                ▼
-     khymeia-exec    khymeia-exec     khymeia-exec      POSIX wrapper (priv/bin)
-          │               │                │
-          ▼               ▼                ▼
-      claude -p      codex exec     fake harness       the harness you installed
+## Using Khymeia
 
-   SessionServer ──publish──► EventBus (Phoenix.PubSub) ──► LiveViews (no polling)
-                 ──persist──► Sessions (Ecto + SQLite)
-```
+### Sessions
 
-### Supervision tree
+*New session → Chat*: choose a **workspace**, a **harness** (or one of its
+provider profiles), a **model**, optionally a **permission mode**, and write
+a prompt.
 
-```text
-Khymeia.Application (one_for_one)
-├── KhymeiaWeb.Telemetry
-├── Khymeia.Repo                         SQLite
-├── Ecto.Migrator                        (releases migrate on boot)
-├── Task: mark sessions left active by a previous run as failed
-├── Phoenix.PubSub (Khymeia.PubSub)      transport of Khymeia.Runtime.EventBus
-├── Khymeia.Runtime.Supervisor (rest_for_one)
-│   ├── Khymeia.Runtime.Registry
-│   ├── Khymeia.Runtime.SessionSupervisor   DynamicSupervisor
-│   │   ├── SessionServer  #1  (:temporary)
-│   │   └── SessionServer  #2  (:temporary)
-│   ├── Khymeia.Workflow.Registry
-│   ├── Khymeia.Workflow.Supervisor         DynamicSupervisor
-│   │   ├── Workflow.Server  #1  (:temporary)
-│   │   └── Workflow.Server  #2  (:temporary)
-│   ├── Khymeia.Runtime.CrashMonitor        records crashed sessions/workflows
-│   └── Khymeia.Harness.Discovery           cached detection results
-└── KhymeiaWeb.Endpoint
-```
+- **Workspace** — picked in a folder-browser modal (recent workspaces, allowed
+  roots, git repositories marked). It only shows folders inside the allowed
+  roots, and the server re-validates every step.
+- **Model** — only what the CLI itself reports: Codex's catalog from
+  `codex debug models`; for Claude Code, the aliases its `--help` documents
+  (`fable`, `opus`, `sonnet`). *Default* leaves the choice to the harness;
+  *Other…* accepts any name the CLI takes. Nothing is guessed.
+- **Permissions** — the non-interactive run cannot ask for approval, so this
+  decides what the agent may do on its own: Claude Code `plan`,
+  `acceptEdits`, `auto`, `dontAsk`; Codex `read-only`, `workspace-write`.
+  `bypassPermissions` and `danger-full-access` are deliberately not offered.
 
-Design decisions worth knowing:
+A session page streams the activity live. When the harness can resume a
+conversation (both can), a finished turn leaves the session **waiting**:
+reply to continue the same conversation, *Mark done*, or *Stop* it at any
+time.
 
-- **Sessions are `:temporary`.** Restarting a session would re-run its prompt,
-  and a coding agent must never silently repeat work. A crash is *recorded*
-  (by `CrashMonitor`, which monitors every session and workflow) instead of retried. Since
-  temporary children don't count towards restart intensity, any number of
-  crashing sessions cannot take the supervisor down.
-- **Adapters are not processes.** `Khymeia.Harness` adapters only build argv,
-  parse output lines and declare capabilities. The session process owns the
-  port, so there is exactly one place where process lifecycle is handled.
-- **A session is a conversation, a turn is an OS process.** When a harness can
-  resume (Claude Code `--resume`, Codex `exec resume`), a finished turn moves
-  the session to `waiting`; sending a message starts a new turn in the same
-  harness conversation.
-- **The Registry holds a summary per session**, so listing sessions reads ETS
-  and never blocks on a busy session process.
-- **The runtime state lives in processes; history lives in SQLite.** Only
-  operational context is persisted (harness, workspace, prompt, status,
-  timestamps, exit code, harness conversation id, basic metadata). Output is
-  kept in memory by the session process (last 2 000 events) and for 30 minutes
-  after it finishes (`session_retention_ms`).
+### Workflows
 
-### Session lifecycle
-
-```text
-starting ──► running ──► completed        exit 0, harness cannot resume
-               │   └───► waiting ◄──┐     exit 0, harness can resume
-               │            │       │
-               │            └► running (follow-up message: new turn)
-               ├───────► failed           non-zero exit, turn timeout, crash
-               └───────► stopped          user request / runtime shutdown
-```
-
-### Events
-
-Published on `Khymeia.Runtime.EventBus` (Phoenix PubSub) as
-`{:session_event, %Khymeia.Runtime.Event{}}`:
-
-| event               | when                                                   |
-|---------------------|--------------------------------------------------------|
-| `session.started`   | first turn's process is running                        |
-| `session.input`     | a user message (the prompt or a follow-up)             |
-| `session.resumed`   | a follow-up turn started                               |
-| `session.output`    | output, with `kind`: assistant, reasoning, tool, stdout, stderr, system, error, result |
-| `session.waiting`   | turn finished; the session accepts a message           |
-| `session.completed` | finished successfully                                  |
-| `session.failed`    | non-zero exit, timeout or crash                        |
-| `session.stopped`   | stopped by the user or by runtime shutdown             |
-
-The session view renders `input` and assistant `output` as conversation turns
-(`YOU` / `CLAUDE CODE`) and the rest as a compact log. Events carry a role
-(`:user`, `:harness`, `:runtime`), which is what a future multi-harness
-conversation — `@codex review what claude just did` — will group by. Sessions
-stay independent internally; a conversation will be a view over their events.
-
-## Workflows
-
-A workflow is a run of a declarative definition in which **roles** are played
-by the harnesses you choose. Khymeia never decides which agent is "better":
-you map `role → harness/model`; Khymeia handles execution, coordination,
-state, handoffs, supervision, recovery and observability; the harnesses do the
-reasoning, coding and tool use. No harness ever talks to another directly —
-every handoff goes through the runtime.
+*New session → Workflow* runs a declarative workflow in which each **role**
+is played by the harness/model you choose. Khymeia never decides which agent
+is "better".
 
 ```text
 Task ─► Implementer ──(ask advisor?)──► Advisor (ephemeral session) ─┐
              ▲   ◄──────────────── answer ────────────────────────────┘
-             │
              ▼
           Auditor (fresh, read-only session)
              │
      PASS ───┴─── FINDINGS ─► Implementer (same conversation) ─► Re-audit ─► …
-      │                                    at most max_iterations, then a human decides
+      │                                   at most max_iterations, then a human decides
      Done
 ```
 
-Start one from **New session → Workflow** (or `Khymeia.Workflow.start/2`):
-workspace, preset, task, optional architectural constraints, a harness/model
-per role and `max_iterations`. `/workflows/:id` shows the step tree (advisor
-calls nested under the step that asked), the role assignments and their real
-permission guarantees, human checkpoints, and a unified timeline — all pushed
-over PubSub.
+**Presets:** *Simple coding* (implement) and *Coding + Audit* (implement →
+audit → fix → re-audit). The run page shows the step tree (advisor calls
+nested under the step that asked), the role assignments with their real
+permission guarantees, human checkpoints and a unified timeline
+(`YOU` / `IMPLEMENTER` / `ADVISOR` / `AUDITOR`), all live.
 
-### Processes
+**Roles.** The engine only knows role *kinds*; adding `security_reviewer` or
+`planner` is one entry in `Khymeia.Workflow.Role`.
 
-Each run is a `Khymeia.Workflow.Server` (`:temporary`) under its own
-`DynamicSupervisor`. Every agent it uses is an ordinary supervised session
-whose **owner** is the workflow: session events are delivered to the owner as
-messages (no subscription race), sessions are monitored (an agent crash is a
-failed *step*, not a workflow crash), and if the workflow dies its sessions
-stop themselves. Advisors are ephemeral sessions that terminate as soon as
-they answer. A crashed workflow is recorded as failed by `CrashMonitor`;
-other workflows and the runtime are unaffected (all covered by tests).
-
-### Roles, kinds and tiers
-
-| role | kind | permissions | notes |
+| Role | Kind | Access | Notes |
 |---|---|---|---|
 | `implementer` | implementer | read + write | its conversation is resumed for fixes, advisor answers and human replies |
-| `advisor` | consultant | read-only | ephemeral; one question, one answer |
-| `auditor` | reviewer | read-only | a fresh, independent session per audit |
+| `advisor` | consultant | read-only | ephemeral: one question, one answer, then the session ends |
+| `auditor` | reviewer | read-only | a fresh, independent session for every audit |
 
-The engine only knows role *kinds*, so `security_reviewer`, `test_reviewer`
-(reviewers), `planner`, `architect` (consultants) or `debugger` (implementer)
-are one entry in `Khymeia.Workflow.Role` away. Default assignments come from
-**capability tiers** (`fast`, `reasoning`, `audit`) in
-`config :khymeia, :workflow_tiers` or `KHYMEIA_TIER_FAST=claude:sonnet`,
-`KHYMEIA_TIER_AUDIT=codex`; a tier without a model leaves the choice to the
-harness.
+**Read-only is only claimed when something enforces it:** Codex's
+`read-only` sandbox (an OS sandbox), Claude Code's `plan` mode (its own
+permission system). For a harness without a read-only mode, the UI and the
+run record say plainly that it is *not* guaranteed.
 
-**Read-only is only claimed when something enforces it:**
+**Capability tiers** (`fast`, `reasoning`, `audit`) give each role a default
+harness/model — configured in `config :khymeia, :workflow_tiers` or with
+`KHYMEIA_TIER_<NAME>=harness[@profile][:model]` — and you can change any of
+them per run.
 
-| harness | read-only mode | enforced by |
-|---|---|---|
-| Codex | `sandbox_mode="read-only"` | Codex's OS sandbox |
-| Claude Code | `--permission-mode plan` | Claude Code's permission system (not an OS sandbox) |
-| Fake / adapters without a read-only mode | — | **nothing**: the UI and the run record say so |
+**How agents talk to Khymeia.** Harnesses share no structured-output format,
+so roles end their reply with a tagged block any model can write and any
+harness can carry as text. `Khymeia.Workflow.Protocol` is the only parsing
+layer:
 
-### Definitions and presets
+```text
+<khymeia:ask-advisor reason="architecture">question</khymeia:ask-advisor>
+<khymeia:ask-human>question</khymeia:ask-human>
+<khymeia:audit>{"status": "findings", "findings": [{"severity": "high", "title": "…", "file": "…", "line": 1}]}</khymeia:audit>
+```
 
-Presets: **Simple coding** (`implement`) and **Coding + Audit**
-(`implement → audit → fix → re_audit`). They are written in the shape any
-future YAML/JSON file will use (`Khymeia.Workflow.Definition.from_map/1`):
+Advisor requests pass an explicit, deterministic policy (`max_calls`,
+`allowed_reasons`); the answer — or the reason it was refused — goes back
+into the implementer's conversation. An audit without a readable verdict is
+**never** taken as a pass.
+
+**Human checkpoints.** A run never loops or guesses on its own; it waits,
+with a reason and the matching action:
+
+| Waiting because | You can |
+|---|---|
+| `clarification_requested` | answer; the reply goes into the implementer's conversation |
+| `max_iterations_reached` | run one more iteration, or accept as done |
+| `step_failed` (exit ≠ 0, timeout, crash) | retry the step, or accept as done |
+| `unparseable_audit` | retry the audit, or accept as done |
+
+**Changed files** come from comparing git snapshots (status + content
+hashes) before and after each step, so files that were already dirty are not
+blamed on the agent; the auditor gets the cumulative list plus the diff.
+Outside a git repository they are reported as unknown, never guessed.
+
+**Definitions** have the shape a YAML/JSON file will use
+(`Khymeia.Workflow.Definition.from_map/1`), with only simple, explicit
+conditions (`<step>.completed|failed|passed|has_findings`) and one bounded
+`repeat`:
 
 ```yaml
 name: coding-with-audit
@@ -237,163 +195,77 @@ max_iterations: 3
 advisor: {max_calls: 3, allowed_reasons: [architecture, security, unclear_requirement, repeated_failure]}
 ```
 
-Conditions are only `<step>.completed|failed|passed|has_findings`, and
-`repeat` is the only loop. One *iteration* is one pass over the steps; each
-`repeat` starts a new one. When the loop would exceed `max_iterations` the run
-stops in `waiting` (`max_iterations_reached`) — it never continues on its own.
+One *iteration* is one pass over the steps; each `repeat` starts a new one.
 
-### How agents talk to Khymeia
-
-Harnesses have no common structured-output format, so roles end their reply
-with a tagged block any model can write and any harness can carry as text
-(`Khymeia.Workflow.Protocol`, the only parsing layer):
-
-```text
-<khymeia:ask-advisor reason="architecture">question</khymeia:ask-advisor>
-<khymeia:ask-human>question</khymeia:ask-human>
-<khymeia:audit>{"status": "findings", "findings": [{"severity": "high", "title": "…", "file": "…", "line": 1}]}</khymeia:audit>
-```
-
-An implementer that asks for the advisor ends its turn; Khymeia checks the
-escalation policy (the reason is stated explicitly by the agent and matched
-against `allowed_reasons`; `max_calls` is counted), runs the advisor, and
-resumes the implementer's conversation with the answer — or with the reason
-the request was refused or failed. The same consultation is available as
-`Khymeia.Workflow.ask(id, :advisor, %{type: :architecture_question, question: …})`.
-An auditor reply without a readable verdict is **never** assumed to pass: the
-run waits for a human (`unparseable_audit`).
-
-### Human checkpoints
-
-`waiting` always has a reason, and the run page offers the matching action:
-
-| reason | action |
-|---|---|
-| `clarification_requested` | answer; the reply is sent into the implementer's conversation |
-| `max_iterations_reached` | run one more iteration, or accept as done |
-| `step_failed` (exit ≠ 0, timeout, crash) | retry the step, or accept as done |
-| `unparseable_audit` | retry the audit, or accept as done |
-
-### Changed files, diffs and results
-
-Each implementer step yields a `StepResult` (`summary`, `changed_files`).
-Changed files come from comparing git snapshots (status + content hashes)
-before and after the step, so pre-existing dirty files are not blamed on the
-agent; the auditor gets the cumulative list plus `git diff` of tracked files.
-Outside a git repository `changed_files` is `nil` ("unknown"), never guessed.
-Khymeia does not run tests itself; implementers and auditors report what they
-ran, within their permissions.
-
-### Events and persistence
-
-`workflow.started|completed|failed|waiting|stopped|resumed`,
-`workflow.iteration.started|completed`, `workflow.step.started|completed|failed`,
-`advisor.started|completed|failed`, `audit.started|completed|findings`,
-`human.requested|answered` — on `"workflow:<id>"` and `"workflows"`.
-
-Runs (`workflows` table) store the definition, role assignments, status,
-waiting reason, iteration, advisor call count and timestamps; steps
-(`workflow_steps`) store role, harness/model/permission, session id, input,
-summary, changed files, audit verdict and errors. The detail page and its
-timeline are projections of these rows, so finished runs look the same after
-a restart. Runs left active by a previous process are marked failed
-(`interrupted`) at boot; external processes are not re-attached.
-
-### Workflow limitations
-
-- **Claude Code in `acceptEdits` cannot run shell commands** in
-  non-interactive mode (verified: an implementer could not run `python3`).
-  To let an implementer run tests, choose `auto` or allowlist commands in
-  your Claude Code settings; Khymeia does not bypass permissions.
-- **Advisor answers and human replies need a resumable implementer**
-  (Claude Code, Codex). Otherwise those instructions are not offered to it.
-- The advisor is consulted between the implementer's turns, not mid-turn.
-- Harness-native structured output (Claude's `--json-schema`, Codex's
-  `--output-schema`) could replace the tagged blocks per adapter later.
-
-## Cloud providers (Bedrock, Foundry, Vertex, Azure OpenAI)
+### Cloud providers
 
 A **provider profile** runs an installed harness against your own cloud
-instead of its default backend. The harness still runs **locally** — agent
-loop, tools, permissions, your files — and only model inference goes to the
-provider, which bills it. Khymeia never calls a provider itself and does not
-become an agent: it only starts the same CLI with the configuration each
-CLI documents.
+instead of its default backend. The CLI still runs **locally** — agent loop,
+tools, permissions, your files — and only model inference goes to the
+provider, which bills it. Khymeia only starts the same CLI with the
+configuration each CLI documents:
 
-| Harness → provider | How Khymeia configures it (per the CLI's docs) |
+| Harness → provider | Configuration |
 |---|---|
-| Claude Code → Amazon Bedrock | `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, `AWS_PROFILE`, optional `ANTHROPIC_BEDROCK_BASE_URL`, optional `AWS_BEARER_TOKEN_BEDROCK` |
-| Claude Code → Microsoft Foundry | `CLAUDE_CODE_USE_FOUNDRY=1`, `ANTHROPIC_FOUNDRY_RESOURCE` or `ANTHROPIC_FOUNDRY_BASE_URL`, `ANTHROPIC_FOUNDRY_API_KEY` or Entra ID (Azure default credential, e.g. `az login`) |
-| Claude Code → Google Vertex AI | `CLAUDE_CODE_USE_VERTEX=1`, `ANTHROPIC_VERTEX_PROJECT_ID`, `CLOUD_ML_REGION`, optional `GOOGLE_APPLICATION_CREDENTIALS` |
-| Codex → Azure OpenAI / Foundry | `-c model_provider="khymeia_azure"` + `model_providers.khymeia_azure.{base_url,env_key,wire_api="responses"}` (v1 API, `…/openai/v1`); API key only — Codex has no Entra ID support |
-| Codex → Amazon Bedrock | `-c model_provider="amazon-bedrock"` + `model_providers.amazon-bedrock.aws.{region,profile}` (AWS credential chain) |
+| Claude Code → Amazon Bedrock | `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, AWS profile / access keys / Bedrock API key, optional `ANTHROPIC_BEDROCK_BASE_URL` |
+| Claude Code → Microsoft Foundry | `CLAUDE_CODE_USE_FOUNDRY=1`, `ANTHROPIC_FOUNDRY_RESOURCE` or `…_BASE_URL`, API key or Entra ID (`az login`) |
+| Claude Code → Google Vertex AI | `CLAUDE_CODE_USE_VERTEX=1`, `ANTHROPIC_VERTEX_PROJECT_ID`, `CLOUD_ML_REGION`, Application Default Credentials |
+| Codex → Azure OpenAI / Foundry | `-c model_provider=…` with the v1 endpoint (`…/openai/v1`, `wire_api = "responses"`); API key (Codex has no Entra ID support) |
+| Codex → Amazon Bedrock | built-in `amazon-bedrock` provider (`aws.region`, `aws.profile`) or access keys |
 
-Codex is configured with `-c` overrides, so `~/.codex/config.toml` is never
-touched. When a Claude Code profile is active, the switches of the other
-providers are explicitly unset for that process.
+Codex is configured with `-c` overrides, so your `~/.codex/config.toml` is
+never modified. Create profiles under **Providers**; each then appears as a
+harness choice in sessions and per workflow role — e.g. the implementer on
+Bedrock and the auditor on Azure OpenAI. **Models** are the provider's
+identifiers (Bedrock model/inference-profile IDs or ARNs, Foundry/Azure
+deployment names); a profile can carry a default, and Foundry and Codex
+profiles need one.
 
-Create profiles at **Providers** (`/providers`). A profile then appears as a
-harness choice everywhere — "Claude Code · Microsoft Foundry · my-resource"
-in New session, and per role in workflows (e.g. implementer on Bedrock,
-auditor on Azure OpenAI). Workflow tiers can name one:
-`KHYMEIA_TIER_AUDIT=codex@azure-prod:my-deployment`.
+**Credentials are never stored by Khymeia.** A profile records only *how* to
+obtain one:
 
-**Credentials are never stored by Khymeia.** A profile records *how* to get
-one:
+| Source | Details |
+|---|---|
+| Ambient | the provider SDK's own chain: AWS profile/SSO, `az login`, gcloud ADC |
+| Environment variable | a variable of Khymeia's own process (a `brew services` daemon does not see your shell exports) |
+| macOS Keychain — API key | pasted once, written to the Keychain (service `khymeia`) through `security -i` on stdin, so it never appears in any process's arguments |
+| macOS Keychain — AWS access keys | access key ID, secret and optional session token entered in a form instead of editing `~/.aws/credentials` |
 
-- **ambient** — the provider SDK's own chain: AWS profile/SSO, `az login`,
-  gcloud Application Default Credentials;
-- **environment variable** — the name of a variable in Khymeia's own
-  environment (a `brew services` daemon does not see your shell exports);
-- **macOS Keychain** — the key you paste is written to your Keychain
-  (service `khymeia`) via `security -i` on stdin, so it never appears in a
-  process's arguments. It is read when each turn starts (rotation needs no
-  restart) and placed only in the harness process environment — never in
-  the database, events, logs or the UI;
-- **AWS access keys in the Keychain** (Bedrock) — access key ID, secret
-  access key and optional session token typed in a form instead of editing
-  `~/.aws/credentials`; passed as `AWS_ACCESS_KEY_ID` /
-  `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`. Khymeia never writes to your
-  AWS files. Prefer an IAM user limited to Bedrock, or SSO profiles.
-
-Every stored credential can be removed at any time (**Forget credential**,
-or deleting the profile). With a named AWS profile, inherited
-`AWS_ACCESS_KEY_ID`/`AWS_BEARER_TOKEN_BEDROCK` variables are cleared for the
-harness, because the AWS SDK would otherwise prefer them over the profile
-and silently use another account.
+Stored credentials are read when each turn starts (so rotation needs no
+restart), handed only to the harness process environment, and never reach
+the database, events, logs or the UI. *Forget credential* removes them at
+any time. When a profile names an AWS profile, inherited
+`AWS_ACCESS_KEY_ID` / `AWS_BEARER_TOKEN_BEDROCK` variables are cleared for
+that process — the AWS SDK would otherwise prefer them and silently use
+another account.
 
 The Providers page runs **local readiness checks only** (variable set, key in
-Keychain, AWS profile present, gcloud credentials file…) — no network call,
-no cost. The only real test is a session.
+the Keychain, AWS profile present, gcloud credentials file) — no network call,
+no cost. A session is the only real test.
 
-**Models** are the provider's identifiers: Bedrock model/inference-profile
-IDs or ARNs, Foundry/Azure deployment names. They are not listed (that would
-need cloud management calls); a profile can carry a default. Foundry (Claude)
-and all Codex profiles need one, because the harness defaults don't exist
-there.
-
-Limitations:
-
-- Not verified against live Bedrock/Foundry/Vertex/Azure accounts (none was
-  available). Verified: each CLI accepts the generated configuration and
-  routes to the configured provider, probed with unreachable endpoints and
-  AWS's published example credentials. Both CLIs load access keys from the
-  environment (Codex's request was rejected by AWS with 401, as expected
-  for fake keys).
-- Codex's Bedrock provider calls Bedrock's OpenAI-compatible endpoint
-  (`bedrock-mantle.<region>.api.aws/openai/v1/responses`), so its model must
-  be one served there (e.g. `openai.gpt-oss-120b-1:0`); Claude models on
-  Bedrock go through Claude Code.
-- `env` settings in `~/.claude/settings.json` (e.g. written by Claude Code's
-  `/setup-bedrock` wizard) also apply to Claude Code; keep provider settings
-  in one place to avoid surprises.
-- The Keychain option is macOS-only; elsewhere use an environment variable.
-- Some Claude Code features depend on the provider (e.g. WebSearch is not
-  available on Bedrock).
+What was and wasn't verified: without live Bedrock/Foundry/Vertex/Azure
+accounts, the profiles were probed against unreachable endpoints and AWS's
+published example keys. Each CLI accepted the generated configuration and
+routed to the configured provider, and both load access keys from the
+environment (Codex's request was rejected by AWS with 401, as expected for
+fake keys). Two findings from those probes: Codex's Bedrock provider uses
+Bedrock's OpenAI-compatible endpoint, so its model must be one served there
+(e.g. `openai.gpt-oss-120b-1:0`) — Claude models on Bedrock go through
+Claude Code; and `env` entries in `~/.claude/settings.json` (e.g. from
+`/setup-bedrock`) also apply, so keep provider settings in one place.
 
 ## Harness adapters
 
-Each adapter implements `Khymeia.Harness`:
+| Harness | Status | Driven with |
+|---|---|---|
+| Claude Code | integrated | `claude -p --output-format stream-json --verbose [--model] [--permission-mode] [--resume ID] -- PROMPT` |
+| Codex | integrated | `codex exec --json [-m] [-c …] -- PROMPT`, `codex exec resume --json … -- THREAD PROMPT` |
+| Fake | dev/test | `priv/bin/khymeia-fake-harness` |
+| Kiro CLI, Copilot CLI, OpenCode, Gemini CLI | detected only | no adapter yet — the dashboard says so |
+
+An adapter implements `Khymeia.Harness`. Adapters are pure modules — they
+build argv, parse output lines and declare capabilities; the session process
+owns the OS process:
 
 ```elixir
 @callback id() :: atom()
@@ -403,63 +275,155 @@ Each adapter implements `Khymeia.Harness`:
 @callback build_command(turn) :: {:ok, %{executable: path, args: [String.t()], env: [...]}} | {:error, term}
 @callback parse_output(:stdout | :stderr, line :: String.t()) :: [event]
 @callback list_models(executable) :: {:ok, [model]} | :error   # optional
+@callback provider_kinds() :: [atom()]                          # optional
 ```
 
-`Capabilities` declares `streaming`, `structured_output`, `programmatic_mode`,
-`resume`, `stop`, `model_selection`, `models` (a fixed closed list, or
-`:unknown` when free-form names are accepted) and `permission_modes`. Adapters
-whose CLI can report its models also implement the optional
-`list_models/1`; discovery caches the result. The UI shows
-controls only for what an adapter declares.
+`Capabilities` declares streaming, structured output, resume, stop, model
+selection (and whether the model list is closed), permission modes, the
+read-only mode and who enforces it. The UI only shows controls an adapter
+declares.
 
-| harness | status | how it is driven |
-|---|---|---|
-| Claude Code | integrated | `claude -p --output-format stream-json --verbose [--model] [--permission-mode] [--resume ID] -- PROMPT` |
-| Codex | integrated | `codex exec --json [-m] [-c sandbox_mode=…] -- PROMPT`, `codex exec resume --json … -- THREAD PROMPT` |
-| Fake | integrated (dev/test) | `priv/bin/khymeia-fake-harness` |
-| Kiro CLI, Copilot CLI, OpenCode, Gemini CLI | detected only | no adapter yet — the dashboard says so |
+**Known limitations, documented rather than faked:**
 
-Flags were taken from the installed CLIs' own `--help` (Claude Code 2.1,
-Codex 0.154), and both integrations were exercised end to end.
+- Non-interactive runs cannot ask for approval mid-turn. In `acceptEdits`,
+  Claude Code cannot run shell commands (verified: an implementer could not
+  run `python3`); use `auto` or allowlist commands in your Claude Code
+  settings. Khymeia never bypasses permissions.
+- Codex refuses to run outside a Git repository; Khymeia does not pass
+  `--skip-git-repo-check`.
+- Follow-up messages go between turns, not during a running turn.
+- *Stop* sends SIGTERM to the harness (SIGKILL after 5 s); well-behaved CLIs
+  clean up their own subprocesses.
+- Activity logs live in memory (last 2 000 events, kept 30 minutes after a
+  session ends); session and workflow history is persisted.
+- Concurrent sessions on the same workspace are not isolated from each other
+  yet — see the [roadmap](#roadmap).
 
-### Known limitations (documented rather than faked)
+**Adding an adapter:** implement `Khymeia.Harness` in
+`lib/khymeia/harness/<name>.ex`, add it to `config :khymeia,
+:harness_adapters`, drop it from `Khymeia.Harness.planned/0`, and test
+`build_command/1` and `parse_output/2` as pure functions — no real CLI needed
+(see `test/khymeia/harness/adapters_test.exs`). Take every flag from the
+installed CLI's `--help` or its official docs.
 
-- **Models come from the CLIs themselves, never from a hard-coded list.**
-  Codex: `codex debug models` (its own catalog; only models Codex shows in
-  its picker, in its order). Claude Code has no command to list models, so
-  Khymeia offers the aliases the installed CLI documents in `claude --help`
-  (`fable`, `opus`, `sonnet` today). Lists are read at discovery time and on
-  *Rescan*. "Other…" still accepts any model name the CLI takes, and
-  "Default" leaves the choice to the harness configuration. If a CLI changes
-  its output format, the list is simply empty.
-- **No interactive approvals.** Both CLIs run non-interactively, so they cannot
-  ask for permission mid-turn. What they may do is decided by the permission
-  mode (Claude Code: `plan`, `acceptEdits`, `auto`, `dontAsk`) or sandbox mode
-  (Codex: `read-only`, `workspace-write`), or by your CLI configuration.
-  `bypassPermissions` and `danger-full-access` are deliberately not offered.
-- **Codex requires a Git repository.** Khymeia does not pass
-  `--skip-git-repo-check`; that is Codex's safety decision to make.
-- **Messages go between turns, not during them.** Follow-ups resume the
-  conversation after a turn finishes; injecting input into a running turn
-  (e.g. Claude Code's `--input-format stream-json`) is future work.
-- **Stopping sends SIGTERM to the harness** (SIGKILL after 5 s). Well-behaved
-  CLIs clean up their own tool subprocesses; Khymeia does not manage process
-  groups.
-- **Activity is not persisted** across restarts of the runtime, only session
-  metadata.
+## Architecture
 
-### Adding an adapter
+```text
+             Phoenix LiveView UI  (never spawns processes)
+                        │
+           ┌────────────┴────────────┐
+           ▼                         ▼
+   Khymeia.Runtime            Khymeia.Workflow           public APIs
+   (sessions)                 (multi-agent runs)
+           │                         │ owns sessions of its roles
+           ▼                         ▼
+   SessionSupervisor          Workflow.Supervisor        DynamicSupervisors
+     └─ SessionServer ◄──────── Workflow.Server
+           │  owns one Erlang Port
+           ▼
+     priv/bin/khymeia-exec    POSIX wrapper: stdin from /dev/null, stdout/stderr
+           │                  tagged, harness killed if the port closes
+           ▼
+     claude -p / codex exec   the CLI you installed (optionally → your cloud)
 
-1. Create `lib/khymeia/harness/<name>.ex` implementing `Khymeia.Harness`.
-2. Add it to `config :khymeia, :harness_adapters`.
-3. Remove it from `Khymeia.Harness.planned/0` if it was listed there.
-4. Test `build_command/1` and `parse_output/2` as pure functions (see
-   `test/khymeia/harness/adapters_test.exs`); no real CLI is needed.
+   events ──► EventBus (Phoenix.PubSub) ──► LiveViews     no polling
+   state  ──► SQLite (Ecto)                                history, workflows, profiles
+```
+
+### Supervision tree
+
+```text
+Khymeia.Application (one_for_one)
+├── KhymeiaWeb.Telemetry
+├── Khymeia.Repo                          SQLite
+├── Ecto.Migrator                         releases migrate on boot
+├── Task                                  mark work left active by a previous run
+├── Phoenix.PubSub                        transport of Khymeia.Runtime.EventBus
+├── Khymeia.Runtime.Supervisor (rest_for_one)
+│   ├── Khymeia.Runtime.Registry          session id → pid + summary
+│   ├── Khymeia.Runtime.SessionSupervisor DynamicSupervisor
+│   │   └── SessionServer …               :temporary
+│   ├── Khymeia.Workflow.Registry
+│   ├── Khymeia.Workflow.Supervisor       DynamicSupervisor
+│   │   └── Workflow.Server …             :temporary
+│   ├── Khymeia.Runtime.CrashMonitor      records crashed sessions and workflows
+│   └── Khymeia.Harness.Discovery         installed harnesses and their models
+└── KhymeiaWeb.Endpoint
+```
+
+### Design decisions
+
+- **Sessions and workflows are `:temporary`.** Restarting would repeat agent
+  work, so a crash is *recorded* by `CrashMonitor` instead of retried; any
+  number of crashes cannot exhaust a supervisor's restart intensity.
+- **One owner per OS process.** Adapters are pure; the session process owns
+  the port, so process lifecycle is handled in exactly one place.
+- **A session is a conversation; a turn is an OS process.** When a turn
+  ends, a resumable session waits; a follow-up starts a new turn in the same
+  harness conversation.
+- **Workflows own their sessions.** Session events are delivered to the
+  owning workflow as messages (no subscription race), sessions are monitored
+  (an agent crash is a failed *step*), and sessions stop themselves if their
+  workflow dies.
+- **The registry holds a summary per session**, so listing never blocks on a
+  busy session.
+- **Runtime state lives in processes; history in SQLite.** The workflow page
+  and its timeline are projections of stored rows, so finished runs look the
+  same after a restart. Work left active by a previous run is marked
+  `interrupted`.
+
+### Session lifecycle and events
+
+```text
+starting ──► running ──► completed     exit 0, not resumable
+               │   └───► waiting ◄─┐   exit 0, resumable: accepts a follow-up
+               │            └──────┘   (follow-up = new turn)
+               ├───────► failed        non-zero exit, timeout, crash
+               └───────► stopped       user, owner workflow gone, shutdown
+```
+
+Session events (`{:session_event, %Khymeia.Runtime.Event{}}`):
+`session.started|input|resumed|output|waiting|completed|failed|stopped`, with
+output kinds `assistant`, `reasoning`, `tool`, `stdout`, `stderr`, `system`,
+`error`, `result`. Workflow events (`{:workflow_event, …}`):
+`workflow.started|completed|failed|waiting|stopped|resumed`,
+`workflow.iteration.*`, `workflow.step.*`, `advisor.*`, `audit.*`,
+`human.requested|answered`.
+
+## Security and trust model
+
+Khymeia starts agents that read and write your files, so it assumes **one
+trusted local user** and is built to be unreachable by anyone else:
+
+- **Loopback only**, `127.0.0.1` by default, with no authentication: anyone
+  who can reach the port can drive your agents. Don't bind it elsewhere
+  without real authentication in front.
+- **DNS-rebinding protection:** requests whose `Host` is not a loopback name
+  are rejected, and LiveView sockets only accept loopback origins, so a web
+  page you visit cannot talk to Khymeia.
+- **No shell:** harnesses start with `Port` + argv; the prompt is one argument
+  after `--`, so it cannot inject flags or shell syntax. The UI can only pick
+  an installed adapter, never run a command.
+- **Validated workspaces:** `~` expanded, `..` collapsed and symlinks
+  resolved before checking the directory is inside the allowed roots — for
+  starting sessions and for every step of the folder browser.
+- **Validated options:** models match a conservative pattern; permission and
+  sandbox modes must be ones the adapter declares; provider settings are
+  plain values, safe as environment variables and TOML strings.
+- **No stored secrets:** each CLI keeps its own auth; provider credentials
+  are referenced, not stored (see [Cloud providers](#cloud-providers)); the
+  daemon's own secrets (`SECRET_KEY_BASE`, `RELEASE_COOKIE`, `DATABASE_PATH`)
+  are removed from every harness environment.
+- **No orphans:** the wrapper terminates the harness when its port closes —
+  on Stop, a crash, or the VM dying.
+
+What Khymeia does *not* protect against: the agents themselves. A harness has
+whatever power its configuration and the chosen permission mode give it.
 
 ## Running as a daemon
 
-Khymeia is an OTP release, meant to run under `launchd` / `systemd` — and,
-eventually, `brew services start khymeia`.
+Khymeia is an OTP release meant to run under `launchd` / `systemd` (and,
+later, `brew services`):
 
 ```bash
 MIX_ENV=prod mix do compile + assets.deploy
@@ -467,115 +431,107 @@ MIX_ENV=prod mix release
 _build/prod/rel/khymeia/bin/khymeia start     # foreground; `daemon` to background
 ```
 
-A release needs no configuration: it migrates its database on boot, and stores
-data in `~/Library/Application Support/Khymeia` (macOS) or
-`$XDG_DATA_HOME/khymeia`, including a generated cookie-signing secret (`0600`).
-
-| variable | default | purpose |
-|---|---|---|
-| `KHYMEIA_PORT` | `4777` | HTTP port |
-| `KHYMEIA_BIND` | `127.0.0.1` | interface to bind; see Security before changing |
-| `KHYMEIA_WORKSPACE_ROOTS` | your home dir | colon-separated directories sessions may run in |
-| `KHYMEIA_TURN_TIMEOUT_SECONDS` | none | kill a turn that runs longer than this |
-| `KHYMEIA_DATA_DIR` | see above | database and secret location |
-| `KHYMEIA_EXTRA_PATH` | — | extra directories to search for harness CLIs |
-| `KHYMEIA_<ID>_BIN` | — | pin a binary, e.g. `KHYMEIA_CLAUDE_BIN=/opt/bin/claude` |
-| `KHYMEIA_ENABLE_FAKE_HARNESS` | `false` | offer the demo harness in a release |
-| `KHYMEIA_TIER_<NAME>` | see config | default `harness[:model]` for a workflow tier |
-| `DATABASE_PATH` | per env | database file (also in dev, to run a second instance) |
+A release needs no configuration: it migrates its database on boot and keeps
+its data — including a generated cookie-signing secret (`0600`) — in
+`~/Library/Application Support/Khymeia` (macOS) or `$XDG_DATA_HOME/khymeia`.
 
 A daemon does not inherit your shell's `PATH`, so discovery also searches
 `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.npm-global/bin`,
-`~/.bun/bin`, `~/.volta/bin` and `~/.cargo/bin`, and harnesses are launched
-with that extended `PATH` (Node-based CLIs need to find `node`).
+`~/.bun/bin`, `~/.volta/bin` and `~/.cargo/bin`, and harnesses run with that
+extended `PATH` (Node-based CLIs need to find `node`).
 
-## Security and local trust model
+## Configuration
 
-Khymeia can start coding agents that read and write your files, so it assumes
-**one trusted local user** and is built to be unreachable by anyone else:
+| Variable | Default | Purpose |
+|---|---|---|
+| `KHYMEIA_PORT` | `4777` | HTTP port |
+| `KHYMEIA_BIND` | `127.0.0.1` | interface to bind — read [Security](#security-and-trust-model) first |
+| `KHYMEIA_WORKSPACE_ROOTS` | your home directory | colon-separated directories sessions may run in |
+| `KHYMEIA_TURN_TIMEOUT_SECONDS` | none | kill a turn that runs longer than this |
+| `KHYMEIA_TIER_<NAME>` | see `config/config.exs` | default `harness[@profile][:model]` for a workflow tier |
+| `KHYMEIA_EXTRA_PATH` | — | extra directories to search for harness CLIs |
+| `KHYMEIA_<ID>_BIN` | — | pin a binary, e.g. `KHYMEIA_CLAUDE_BIN=/opt/bin/claude` |
+| `KHYMEIA_ENABLE_FAKE_HARNESS` | `false` in releases | offer the demo harness |
+| `KHYMEIA_DATA_DIR` | see above | database and secret location (releases) |
+| `DATABASE_PATH` | per environment | database file (in dev, lets a second instance run alongside) |
 
-- **Loopback only.** It binds to `127.0.0.1` by default. There is no
-  authentication: anyone who can reach the port can drive your agents. Do not
-  bind it to another interface unless you put real authentication in front.
-- **DNS-rebinding protection.** HTTP requests whose `Host` is not `localhost`,
-  `127.0.0.1` or `[::1]` are rejected, and LiveView sockets only accept those
-  origins, so a web page you visit cannot talk to Khymeia.
-- **No shell.** Harnesses are started with `Port` + argv. The prompt is a single
-  argument after `--`, never interpolated into a command string, so it cannot
-  inject flags or shell syntax. The UI cannot run arbitrary commands: it can
-  only pick an installed adapter.
-- **Validated workspaces.** Paths are expanded, `..` collapsed and symlinks
-  resolved before checking they are directories inside the allowed roots.
-  Workspaces are chosen in a folder-browser modal served by the runtime (a
-  browser's native folder dialog never reveals absolute paths); it lists
-  folder names only, and only inside those same roots — every navigation
-  and selection is re-validated on the server.
-- **Validated options.** Models must match a conservative pattern; permission
-  and sandbox modes must be one the adapter declares.
-- **No secrets.** Khymeia stores no tokens or API keys; each CLI keeps its own
-  auth. The daemon's own secrets (`SECRET_KEY_BASE`, `RELEASE_COOKIE`,
-  `DATABASE_PATH`) are removed from the harness environment.
-- **No orphans.** `priv/bin/khymeia-exec` terminates the harness when its port
-  closes — on Stop, on a session crash, or if the VM dies.
+Application settings (`config/config.exs`): `harness_adapters`,
+`turn_timeout`, `session_retention_ms`, `max_sessions`, `max_workflows`,
+`workflow_tiers`.
 
-What Khymeia does *not* protect against: the agents themselves. A harness has
-whatever power its own configuration and the chosen permission mode give it.
+## Development
+
+```bash
+mix test         # 130 tests; no agent CLI needed (fake harness, in-memory secrets)
+mix precommit    # compile --warnings-as-errors, unused deps, format, test
+```
+
+[CI](.github/workflows/ci.yml) runs the same checks on every push and pull
+request, with the versions in `.tool-versions`.
+
+- **The fake harness** (`priv/bin/khymeia-fake-harness`) is a real OS process
+  driven through the same wrapper and port as Claude Code or Codex, so tests
+  exercise the whole runtime — streaming, failures, timeouts, crashes,
+  workflows, provider plumbing.
+- **Tests never touch your Keychain** (`Khymeia.MemorySecrets`) and never run
+  a real agent CLI.
+- **Probing real CLIs** is done by hand and kept cost-free: tiny prompts,
+  unreachable endpoints, documented example credentials.
+- Commits follow Conventional Commits: `type(scope): summary`.
+
+```text
+lib/khymeia/
+  runtime.ex  workflow.ex  providers.ex      public APIs
+  runtime/     supervisors, session server, registry, crash monitor, event bus, OS process
+  harness/     behaviour helpers, discovery, adapters (claude, codex, fake)
+  workflow/    server, definition, presets, roles, protocol, prompts, git, timeline, store
+  providers/   profile schema, secrets behaviour, Keychain backend
+  sessions/    session history (Ecto)
+  workspace.ex path validation and folder browsing
+lib/khymeia_web/
+  live/        dashboard, new session/workflow, session, workflow, providers
+  components/  layouts, session components, workspace picker
+  plugs/       loopback-only guard
+priv/bin/      khymeia-exec (process wrapper), khymeia-fake-harness
+```
+
+## Roadmap
+
+The aim is a tool of high quality that does a few things very well, not a
+platform. In order:
+
+1. **Consolidate** — CI, and real day-to-day use to collect friction.
+2. **Worktree isolation** — each session or workflow in its own git worktree
+   and branch, with a diff view and explicit keep / discard (never an
+   automatic merge). Makes concurrent agents on one repository safe and gives
+   auditors exactly the agent's own changes.
+3. **Continuity** — persisted activity logs, resuming interrupted sessions
+   through the harness's own conversation id, cost and usage per session and
+   workflow.
+4. **Chat and interactive takeover** — continue any session or workflow step
+   in the harness's real interactive UI, embedded in Khymeia, on the same
+   conversation (`claude --resume`, `codex resume`), worktree and provider
+   profile, then hand it back.
+5. **Implementers that verify** — per-role allowed commands (e.g. Claude
+   Code's `--allowedTools`) and a workflow verification command run by
+   Khymeia, with results passed to the auditor.
+6. **Handoff between harnesses, distribution and more adapters** —
+   "continue in another harness", Homebrew formula, Gemini CLI and Copilot
+   CLI once their non-interactive modes are verified.
+
+Deliberately out of scope: an agent loop of its own, direct model API calls,
+automatic planning or task decomposition, model routing, remote execution,
+multi-user, and organisation-wide context platforms.
 
 ## Why Elixir
 
 Supervising agent sessions is the problem OTP was designed for:
-
-- **Long-running processes** — a daemon that runs for weeks, with each session
-  as a cheap, isolated BEAM process holding its own state.
-- **Supervision and fault isolation** — a harness that crashes, hangs or floods
-  output affects its own process only; supervisors define exactly what happens
-  next.
-- **Message passing** — port output arrives as messages to the session that
-  owns it; events fan out through PubSub to any number of listeners.
-- **Real-time UI for free** — LiveView turns those events into live pages with
-  no separate frontend, API layer or polling.
-- **A natural model** — independent agent sessions *are* independent
-  processes; future handoffs between agents are messages between them.
-
-## Project layout
-
-```text
-lib/khymeia/
-  runtime.ex                  public API (sessions)
-  workflow.ex                 public API (workflows)
-  workflow/
-    server.ex  supervisor.ex  definition.ex  presets.ex  role.ex
-    protocol.ex  prompts.ex  git.ex  timeline.ex
-    run.ex  step.ex  store.ex  results.ex  event.ex
-  session.ex                  runtime snapshot struct + status lifecycle
-  workspace.ex                path validation
-  harness.ex                  adapter behaviour + known harnesses
-  harness/
-    capabilities.ex  discovery.ex  executable.ex
-    claude.ex  codex.ex  fake.ex  summary.ex
-  runtime/
-    supervisor.ex  session_supervisor.ex  session_server.ex
-    crash_monitor.ex  registry.ex  event.ex  event_bus.ex  os_process.ex
-  providers.ex                provider profiles (context)
-  providers/  profile.ex  secrets.ex  keychain.ex
-  sessions.ex                 persistence context
-  sessions/session_record.ex  Ecto schema
-lib/khymeia_web/
-  live/  dashboard_live.ex  session_new_live.ex  session_live.ex
-         workflow_new_live.ex  workflow_live.ex
-  components/session_components.ex
-  plugs/local_only.ex
-priv/bin/
-  khymeia-exec                process wrapper (stdin, stderr tagging, cleanup)
-  khymeia-fake-harness        demo/test harness
-```
-
-## Not in scope (yet)
-
-Deliberately left out so far: visual workflow editors, LLM-generated
-workflows, automatic model routing or benchmarking, direct model API calls, an agent loop, MCP/A2A
-servers, multi-user, authentication, cloud deployment, clustering, RAG or
-vector memory, and issue-tracker integrations.
+long-running, isolated processes with their own state; supervision that
+defines exactly what happens when one crashes, hangs or floods output;
+message passing from ports to sessions to any number of listeners; and
+LiveView, which turns those events into live pages with no separate frontend
+or polling. Independent agent sessions *are* independent processes, and
+handoffs between agents are messages between them.
 
 ## License
 
