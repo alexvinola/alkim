@@ -535,3 +535,18 @@ a.a-row:hover { background: var(--a-sunken); }
 .a-worktree-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .a-worktree-actions { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .3rem; }
 .a-input-inline { width: auto; min-width: 12rem; height: 1.9rem; font-size: 12.5px; }
+
+/* Workflow agents: one pane per role, the run seen from inside. */
+.a-term-tabs { display: flex; gap: .3rem; overflow-x: auto; margin-bottom: .6rem; padding-bottom: .2rem; }
+.a-term-tab {
+  display: inline-flex; align-items: center; gap: .4rem; padding: .25rem .65rem; border-radius: 6px;
+  border: 1px solid var(--a-border); background: var(--a-surface); color: var(--a-muted);
+  font-size: 12.5px; cursor: pointer; white-space: nowrap; text-decoration: none;
+}
+.a-term-tab:hover { color: var(--a-text); }
+.a-term-tab-on { border-color: var(--a-accent); color: var(--a-text); background: var(--a-accent-soft); }
+.a-agent-head {
+  display: flex; align-items: center; gap: .6rem; padding: .55rem 1rem;
+  border-bottom: 1px solid var(--a-border);
+}
+.a-agents .a-activity { max-height: 58vh; }

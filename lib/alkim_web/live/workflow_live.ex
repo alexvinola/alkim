@@ -16,9 +16,9 @@ defmodule AlkimWeb.WorkflowLive do
 
   import AlkimWeb.SessionComponents
 
-  alias Alkim.Workflow
+  alias Alkim.{Runtime, Workflow, Worktrees}
+  alias Alkim.Runtime.Event
   alias Alkim.Workflow.{Role, Run, Timeline}
-  alias Alkim.Worktrees
 
   @tabs ~w(timeline steps agents changes roles)
 
@@ -30,7 +30,13 @@ defmodule AlkimWeb.WorkflowLive do
       {:ok, run, steps} ->
         {:ok,
          socket
-         |> assign(reply: "", tab: "timeline", project: Alkim.Projects.get(run.project_id))
+         |> assign(
+           reply: "",
+           tab: "timeline",
+           agent: nil,
+           agent_events: [],
+           project: Alkim.Projects.get(run.project_id)
+         )
          |> assign_run(run, steps)}
 
       :error ->
@@ -40,12 +46,61 @@ defmodule AlkimWeb.WorkflowLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply,
-     assign(socket, tab: if(params["tab"] in @tabs, do: params["tab"], else: "timeline"))}
+    tab = if params["tab"] in @tabs, do: params["tab"], else: "timeline"
+
+    # On the agents tab, show one agent's own output: the run seen through
+    # the eyes of whoever is doing the work, not merged with everyone else.
+    wanted =
+      if tab == "agents",
+        do: params["a"] || socket.assigns.agent || default_agent(socket.assigns.agents),
+        else: nil
+
+    {:noreply, socket |> assign(tab: tab) |> watch_agent(wanted)}
+  end
+
+  # The implementer is the one a human talks to, so it is what opens first.
+  defp default_agent([]), do: nil
+
+  defp default_agent(agents) do
+    agent = Enum.find(agents, &(&1.role == "implementer")) || List.first(agents)
+    agent.session_id
+  end
+
+  defp watch_agent(%{assigns: %{agent: same}} = socket, same) when not is_nil(same), do: socket
+
+  defp watch_agent(socket, nil) do
+    if socket.assigns.agent, do: Runtime.unsubscribe_session(socket.assigns.agent)
+    assign(socket, agent: nil, agent_events: [])
+  end
+
+  defp watch_agent(socket, session_id) do
+    if socket.assigns.agent, do: Runtime.unsubscribe_session(socket.assigns.agent)
+    if connected?(socket), do: Runtime.subscribe_session(session_id)
+
+    case Runtime.get_session(session_id) do
+      {:ok, session, events} ->
+        assign(socket,
+          agent: session_id,
+          agent_session: session,
+          agent_events: events,
+          agent_harness: harness_name(session.harness)
+        )
+
+      :error ->
+        assign(socket, agent: nil, agent_events: [])
+    end
   end
 
   @impl true
   def handle_info({:workflow_event, _event}, socket), do: {:noreply, reload(socket)}
+
+  # Only the agent being watched: a run has several, and a view shows one.
+  def handle_info({:session_event, %Event{session_id: id} = event}, socket)
+      when id == socket.assigns.agent do
+    {:noreply, assign(socket, agent_events: socket.assigns.agent_events ++ [event])}
+  end
+
+  def handle_info({:session_event, _event}, socket), do: {:noreply, socket}
 
   @impl true
   def handle_event("stop", _, socket), do: act(socket, Workflow.stop(socket.assigns.run.id))
@@ -125,6 +180,7 @@ defmodule AlkimWeb.WorkflowLive do
 
       %{
         session_id: session_id,
+        workflow_id: latest.workflow_id,
         role: latest.role,
         harness: latest.harness,
         model: latest.model,
@@ -153,7 +209,7 @@ defmodule AlkimWeb.WorkflowLive do
         kind: :session,
         title: agent.label,
         status: agent.status,
-        path: ~p"/sessions/#{agent.session_id}"
+        path: ~p"/workflows/#{agent.workflow_id}/agents?#{[a: agent.session_id]}"
       }
     end
   end
@@ -278,34 +334,55 @@ defmodule AlkimWeb.WorkflowLive do
         </div>
       </section>
 
-      <section :if={@tab == "agents"} class="a-section">
+      <section :if={@tab == "agents"} class="a-section a-agents">
         <div :if={@agents == []} class="a-panel a-empty">
           No agent has started yet. Each one appears here, and in the list on the left.
         </div>
-        <div class="a-panel a-rows">
+
+        <div :if={@agents != []} class="a-term-tabs">
           <.link
             :for={agent <- @agents}
-            navigate={~p"/sessions/#{agent.session_id}"}
-            id={"agent-#{agent.session_id}"}
-            class="a-row a-row-role"
+            patch={~p"/workflows/#{@run.id}/agents?#{[a: agent.session_id]}"}
+            id={"agent-tab-#{agent.session_id}"}
+            class={["a-term-tab", @agent == agent.session_id && "a-term-tab-on"]}
           >
-            <span>
-              {agent.label}
-              <span :if={agent.steps > 1} class="a-tag">{agent.steps} steps</span>
-            </span>
-            <span>
-              {harness_name(agent.harness)}
-              <span :if={agent.model} class="a-mono a-muted">· {agent.model}</span>
-            </span>
-            <.status status={agent.status} />
-            <span class="a-mono a-muted" style="text-align:right">
-              <%= if agent.status in [:running, :waiting] do %>
-                <.elapsed id={"agent-elapsed-#{agent.session_id}"} since={agent.started_at} />
-              <% else %>
-                {format_duration(agent.started_at, agent.completed_at)}
-              <% end %>
-            </span>
+            <span class={["a-dot", "a-status-#{agent.status}"]}></span>
+            {agent.label}
+            <span :if={agent.role == "implementer"} class="a-hint">· main</span>
           </.link>
+        </div>
+
+        <div :if={@agent} class="a-panel">
+          <div class="a-agent-head">
+            <span class="a-mono a-faint">{@agent_harness}</span>
+            <.status status={@agent_session.status} />
+            <span style="flex:1"></span>
+            <.link navigate={~p"/sessions/#{@agent}"} class="a-hint a-link">Open on its own →</.link>
+          </div>
+
+          <div id={"agent-output-#{@agent}"} class="a-activity" phx-hook="FollowTail">
+            <div
+              :if={@agent_events == [] and not Alkim.Session.terminal?(@agent_session.status)}
+              class="a-empty"
+            >
+              Waiting for output…
+            </div>
+            <div
+              :if={@agent_events == [] and Alkim.Session.terminal?(@agent_session.status)}
+              class="a-empty"
+            >
+              This agent has finished and its process is gone. Alkim keeps a session's
+              activity in memory while it runs, so there is nothing to replay here — the
+              <.link patch={~p"/workflows/#{@run.id}/timeline"} class="a-link">timeline</.link>
+              keeps what it said.
+            </div>
+            <.event
+              :for={event <- @agent_events}
+              id={"ae-#{@agent}-#{event.seq}"}
+              event={event}
+              harness_name={@agent_harness}
+            />
+          </div>
         </div>
       </section>
 

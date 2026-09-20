@@ -221,6 +221,7 @@ defmodule Alkim.Runtime do
 
   defdelegate subscribe_sessions, to: EventBus
   defdelegate subscribe_session(id), to: EventBus
+  defdelegate unsubscribe_session(id), to: EventBus
   defdelegate subscribe_harnesses, to: EventBus
 
   ## Helpers

@@ -150,6 +150,37 @@ branch for you to review, rebase or merge yourself. *Discard* removes both.
 Nothing here writes to your main branch — a tool that quietly integrates agent
 work is a tool you cannot trust with a repository.
 
+### Workflow runs
+
+A run's page is laid out like a project's: a header that does not move, then
+tabs over what the run is made of.
+
+- **Timeline** — everything that happened, merged and in order.
+- **Steps** — the step tree, with advisor consultations nested under the step
+  that asked.
+- **Agents** — the run seen from *inside*: one pane per agent, with its own
+  output, and a picker to switch between them. The implementer opens first
+  and is marked *main*, because it is the one a human talks to. Watching it
+  receive the advisor's answer is the point: you see the agents talking.
+- **Changes** — what the run did in its worktree. A run that works in the
+  project folder says so instead, because there its changes cannot be told
+  apart from anything else happening there.
+- **Roles** — the mapping you chose, and any permission Alkim could not
+  actually enforce.
+
+Agents are grouped by **conversation, not by step**: an implementer that
+implements and then fixes is one agent with two steps, while each audit round
+is a fresh, independent session. The page shows that distinction because it
+is the design.
+
+Status and a human checkpoint stay *above* the tabs. They are what a run
+needs you for, and must never be hidden behind a tab you did not open.
+
+A limitation worth knowing: a session's activity lives in its process, so an
+agent that has finished — an advisor is terminated as soon as it answers —
+has nothing left to replay in its pane. The timeline keeps what it said.
+Persisting activity is the next step for this (see the roadmap).
+
 ### Terminals
 
 *Project → Terminal* runs the harness's **own interactive interface** inside
