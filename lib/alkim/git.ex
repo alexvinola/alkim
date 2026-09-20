@@ -214,6 +214,43 @@ defmodule Alkim.Git do
     end
   end
 
+  @doc """
+  Local branches, saying which are already checked out somewhere.
+
+  git refuses to check a branch out in two worktrees at once, so a branch
+  that is in use is offered as unavailable rather than as a choice that
+  fails on submit.
+  """
+  @spec branches(String.t()) :: [%{name: String.t(), checked_out: boolean()}]
+  def branches(repository) do
+    case git_cmd(repository, ["branch", "--format=%(refname:short)\t%(worktreepath)"]) do
+      {:ok, out} ->
+        for line <- String.split(out, "\n", trim: true) do
+          case String.split(line, "\t", parts: 2) do
+            [name, path] -> %{name: name, checked_out: String.trim(path) != ""}
+            [name] -> %{name: name, checked_out: false}
+          end
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  @doc """
+  Adds a worktree that checks out an **existing** branch, rather than
+  creating one. The branch keeps its history; nothing is reset.
+  """
+  @spec add_worktree_for(String.t(), String.t(), String.t()) ::
+          {:ok, %{path: String.t(), branch: String.t(), base_commit: String.t()}}
+          | {:error, String.t()}
+  def add_worktree_for(repository, path, branch) do
+    with {:ok, _} <-
+           git_cmd(repository, ["worktree", "add", path, branch], timeout: @worktree_timeout) do
+      {:ok, %{path: path, branch: branch, base_commit: head(path)}}
+    end
+  end
+
   @doc "Worktrees git knows about, as `%{path:, branch:, head:}`."
   @spec worktrees(String.t()) :: [map()]
   def worktrees(repository) do

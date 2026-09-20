@@ -36,31 +36,78 @@ defmodule Alkim.Worktrees do
   user typed is reduced to a safe slug first, because it ends up as a path
   and a ref.
   """
-  @spec create(map(), String.t() | nil) :: {:ok, Worktree.t()} | {:error, error()}
-  def create(project, name \\ nil) do
+  @spec create(map(), String.t() | nil, keyword()) :: {:ok, Worktree.t()} | {:error, error()}
+  def create(project, name \\ nil, opts \\ []) do
     with {:ok, repository} <- repository(project.path),
-         {:ok, base} <- base_commit(repository),
-         slug = slug(name),
-         {:ok, path} <- destination(repository, slug),
+         {:ok, base} <- base_commit(repository) do
+      case Keyword.get(opts, :branch, :new) do
+        :new -> create_on_new_branch(project, repository, base, name)
+        {:existing, branch} -> create_on_branch(project, repository, branch)
+        _ -> {:error, {:invalid, %{worktree: "choose a branch"}}}
+      end
+    end
+  end
+
+  defp create_on_new_branch(project, repository, base, name) do
+    slug = slug(name)
+
+    with {:ok, path} <- destination(repository, slug),
          branch = branch_name(slug),
          :ok <- ensure_free(path, branch) do
-      case Git.add_worktree(repository, path, branch, base) do
-        {:ok, created} ->
-          %Worktree{
-            id: Ecto.UUID.generate(),
-            project_id: project.id,
-            repository: repository,
-            path: created.path,
-            branch: created.branch,
-            base_branch: current_branch(repository),
-            base_commit: created.base_commit || base,
-            status: :active
-          }
-          |> insert()
+      repository
+      |> Git.add_worktree(path, branch, base)
+      |> record(project, repository, current_branch(repository), base)
+    end
+  end
 
-        {:error, message} ->
-          {:error, {:invalid, %{worktree: first_line(message)}}}
-      end
+  # An existing branch keeps its own history, so the base is where that
+  # branch already is — not wherever the project happens to be standing.
+  defp create_on_branch(project, repository, branch) do
+    with :ok <- known_branch(repository, branch),
+         {:ok, path} <- destination(repository, slug(branch)),
+         :ok <- ensure_free(path, nil) do
+      repository
+      |> Git.add_worktree_for(path, branch)
+      |> record(project, repository, branch, nil)
+    end
+  end
+
+  defp known_branch(repository, branch) do
+    case Enum.find(Git.branches(repository), &(&1.name == branch)) do
+      nil ->
+        {:error, {:invalid, %{worktree: "no branch named #{branch}"}}}
+
+      %{checked_out: true} ->
+        {:error, {:invalid, %{worktree: "#{branch} is already checked out"}}}
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp record({:ok, created}, project, repository, base_branch, base) do
+    %Worktree{
+      id: Ecto.UUID.generate(),
+      project_id: project.id,
+      repository: repository,
+      path: created.path,
+      branch: created.branch,
+      base_branch: base_branch,
+      base_commit: created.base_commit || base,
+      status: :active
+    }
+    |> insert()
+  end
+
+  defp record({:error, message}, _project, _repository, _base_branch, _base),
+    do: {:error, {:invalid, %{worktree: first_line(message)}}}
+
+  @doc "Branches that could host a new worktree, plus those already in use."
+  @spec branches(map()) :: [%{name: String.t(), checked_out: boolean()}]
+  def branches(project) do
+    case Git.repository(project.path) do
+      :unavailable -> []
+      repository -> Git.branches(repository)
     end
   end
 
@@ -227,9 +274,14 @@ defmodule Alkim.Worktrees do
 
   defp ensure_free(path, branch) do
     cond do
-      File.exists?(path) -> {:error, {:invalid, %{worktree: "#{path} already exists"}}}
-      Repo.get_by(Worktree, branch: branch) -> {:error, {:invalid, %{worktree: "name in use"}}}
-      true -> :ok
+      File.exists?(path) ->
+        {:error, {:invalid, %{worktree: "#{path} already exists"}}}
+
+      branch && Repo.get_by(Worktree, branch: branch) ->
+        {:error, {:invalid, %{worktree: "name in use"}}}
+
+      true ->
+        :ok
     end
   end
 

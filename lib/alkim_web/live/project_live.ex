@@ -37,6 +37,8 @@ defmodule AlkimWeb.ProjectLive do
        terminals: [],
        worktrees: [],
        worktree_name: "",
+       worktree_branch: "new",
+       branches: [],
        terminal_harness: nil,
        terminal_options: []
      )}
@@ -91,13 +93,22 @@ defmodule AlkimWeb.ProjectLive do
 
   ## Worktrees
 
-  def handle_event("name_worktree", %{"worktree" => %{"name" => name}}, socket),
-    do: {:noreply, assign(socket, worktree_name: name)}
+  def handle_event("name_worktree", %{"worktree" => params}, socket) do
+    {:noreply,
+     assign(socket,
+       worktree_name: params["name"] || socket.assigns.worktree_name,
+       worktree_branch: params["branch"] || socket.assigns.worktree_branch
+     )}
+  end
 
-  def handle_event("create_worktree", %{"worktree" => %{"name" => name}}, socket) do
-    case Worktrees.create(socket.assigns.project, name) do
+  def handle_event("create_worktree", %{"worktree" => params}, socket) do
+    branch =
+      if params["branch"] in [nil, "", "new"], do: :new, else: {:existing, params["branch"]}
+
+    case Worktrees.create(socket.assigns.project, params["name"], branch: branch) do
       {:ok, _worktree} ->
-        {:noreply, socket |> assign(worktree_name: "") |> load_worktrees()}
+        {:noreply,
+         socket |> assign(worktree_name: "", worktree_branch: "new") |> load_worktrees()}
 
       {:error, {:invalid, errors}} ->
         {:noreply, put_flash(socket, :error, describe(errors))}
@@ -330,7 +341,7 @@ defmodule AlkimWeb.ProjectLive do
       |> Worktrees.list_for_project(12)
       |> Enum.map(&%{record: &1, work: Worktrees.work(&1)})
 
-    assign(socket, worktrees: worktrees)
+    assign(socket, worktrees: worktrees, branches: Worktrees.branches(project))
   end
 
   defp load_terminals(%{assigns: %{project: project}} = socket),
@@ -487,7 +498,19 @@ defmodule AlkimWeb.ProjectLive do
           phx-change="name_worktree"
           class="a-launcher-form"
         >
+          <select name="worktree[branch]" class="a-select a-select-inline" id="worktree_branch">
+            <option value="new" selected={@worktree_branch == "new"}>New branch</option>
+            <option
+              :for={branch <- @branches}
+              value={branch.name}
+              selected={branch.name == @worktree_branch}
+              disabled={branch.checked_out}
+            >
+              {branch.name}{if branch.checked_out, do: " — in use"}
+            </option>
+          </select>
           <input
+            :if={@worktree_branch == "new"}
             name="worktree[name]"
             value={@worktree_name}
             class="a-input a-input-inline"

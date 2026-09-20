@@ -161,6 +161,33 @@ defmodule Alkim.WorktreesTest do
     Alkim.Workflow.stop(run.id)
   end
 
+  test "a worktree can check out an existing branch instead of making one", %{project: project} do
+    git = System.find_executable("git")
+    {_, 0} = System.cmd(git, ["-C", project.path, "branch", "feature/login"])
+
+    {:ok, worktree} = Worktrees.create(project, nil, branch: {:existing, "feature/login"})
+
+    assert worktree.branch == "feature/login"
+    assert worktree.base_branch == "feature/login"
+    assert File.dir?(worktree.path)
+  end
+
+  test "a branch already checked out somewhere is refused, not forced", %{project: project} do
+    {:ok, worktree} = Worktrees.create(project, "taken")
+
+    assert {:error, {:invalid, %{worktree: message}}} =
+             Worktrees.create(project, nil, branch: {:existing, worktree.branch})
+
+    assert message =~ "already checked out"
+  end
+
+  test "an unknown branch is refused", %{project: project} do
+    assert {:error, {:invalid, %{worktree: message}}} =
+             Worktrees.create(project, nil, branch: {:existing, "does/not/exist"})
+
+    assert message =~ "no branch named"
+  end
+
   # Worktrees live beside the repository, so an agent running in one is
   # outside every project directory. It must not register its own worktree
   # as a project of its own.
