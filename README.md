@@ -42,7 +42,8 @@ Early and moving fast, but built to be trusted with real work:
 | Sessions with Claude Code and Codex | working, exercised end to end against the installed CLIs |
 | Workflows (implement → audit → fix loop, advisor, human checkpoints) | working; verified with Claude Code as implementer and auditor on a test repository |
 | Cloud providers (Bedrock, Foundry, Vertex, Azure OpenAI) | implemented from the CLIs' official docs; configuration accepted by the real CLIs, **not yet run against live accounts** |
-| Test suite | 130 tests, no agent CLI required ([CI](.github/workflows/ci.yml)) |
+| Projects and shell (sidebar, per-project overview, repository tab) | working |
+| Test suite | 141 tests, no agent CLI required ([CI](.github/workflows/ci.yml)) |
 | Packaging | OTP release works; Homebrew formula pending |
 
 Every integration is checked against the installed CLI's `--help` or its
@@ -60,8 +61,8 @@ mix setup          # deps, database, assets
 mix phx.server
 ```
 
-Open <http://127.0.0.1:4777>. The dashboard lists the harnesses Khymeia found
-on your machine.
+Open <http://127.0.0.1:4777>. Add the folder you work in as a project; the
+sidebar lists the harnesses Khymeia found on your machine.
 
 No agent CLI? In development a **Fake harness** is always available, so the
 whole runtime can be tried without one. Choose it in *New session* and pick a
@@ -261,7 +262,7 @@ Claude Code; and `env` entries in `~/.claude/settings.json` (e.g. from
 | Claude Code | integrated | `claude -p --output-format stream-json --verbose [--model] [--permission-mode] [--resume ID] -- PROMPT` |
 | Codex | integrated | `codex exec --json [-m] [-c …] -- PROMPT`, `codex exec resume --json … -- THREAD PROMPT` |
 | Fake | dev/test | `priv/bin/khymeia-fake-harness` |
-| Kiro CLI, Copilot CLI, OpenCode, Gemini CLI | detected only | no adapter yet — the dashboard says so |
+| Kiro CLI, Copilot CLI, OpenCode, Gemini CLI | detected only | no adapter yet — the UI says so |
 
 An adapter implements `Khymeia.Harness`. Adapters are pure modules — they
 build argv, parse output lines and declare capabilities; the session process
@@ -462,7 +463,7 @@ Application settings (`config/config.exs`): `harness_adapters`,
 ## Development
 
 ```bash
-mix test         # 130 tests; no agent CLI needed (fake harness, in-memory secrets)
+mix test         # 141 tests; no agent CLI needed (fake harness, in-memory secrets)
 mix precommit    # compile --warnings-as-errors, unused deps, format, test
 ```
 
@@ -482,46 +483,138 @@ request, with the versions in `.tool-versions`.
 ```text
 lib/khymeia/
   runtime.ex  workflow.ex  providers.ex      public APIs
+  projects.ex git.ex                          projects and repository state
   runtime/     supervisors, session server, registry, crash monitor, event bus, OS process
   harness/     behaviour helpers, discovery, adapters (claude, codex, fake)
   workflow/    server, definition, presets, roles, protocol, prompts, git, timeline, store
   providers/   profile schema, secrets behaviour, Keychain backend
   sessions/    session history (Ecto)
+  projects/    project schema
   workspace.ex path validation and folder browsing
 lib/khymeia_web/
-  live/        dashboard, new session/workflow, session, workflow, providers
-  components/  layouts, session components, workspace picker
+  live/        projects, project, sessions, new session/workflow, session,
+               workflow, providers
+  components/  layouts (shell), session components, workspace picker
+  nav.ex       sidebar state, mounted as a hook on every LiveView
   plugs/       loopback-only guard
 priv/bin/      khymeia-exec (process wrapper), khymeia-fake-harness
 ```
 
 ## Roadmap
 
-The aim is a tool of high quality that does a few things very well, not a
-platform. In order:
+The aim is a local tool that makes working with several coding agents feel
+controlled, observable and safe. Khymeia should stay focused: sessions,
+isolated work, reviewable changes and explicit coordination rather than
+becoming a general-purpose development platform. In order:
 
-1. **Consolidate** — CI, and real day-to-day use to collect friction.
-2. **Worktree isolation** — each session or workflow in its own git worktree
-   and branch, with a diff view and explicit keep / discard (never an
-   automatic merge). Makes concurrent agents on one repository safe and gives
-   auditors exactly the agent's own changes.
-3. **Continuity** — persisted activity logs, resuming interrupted sessions
-   through the harness's own conversation id, cost and usage per session and
-   workflow.
-4. **Chat and interactive takeover** — continue any session or workflow step
-   in the harness's real interactive UI, embedded in Khymeia, on the same
-   conversation (`claude --resume`, `codex resume`), worktree and provider
-   profile, then hand it back.
-5. **Implementers that verify** — per-role allowed commands (e.g. Claude
-   Code's `--allowedTools`) and a workflow verification command run by
-   Khymeia, with results passed to the auditor.
-6. **Handoff between harnesses, distribution and more adapters** —
-   "continue in another harness", Homebrew formula, Gemini CLI and Copilot
-   CLI once their non-interactive modes are verified.
+1. **Consolidate the runtime** — CI, packaging and real day-to-day use with
+   Claude Code and Codex to collect friction before expanding the surface
+   area. Finish the Homebrew distribution path and keep every integration
+   verified against the real installed CLI.
 
-Deliberately out of scope: an agent loop of its own, direct model API calls,
-automatic planning or task decomposition, model routing, remote execution,
-multi-user, and organisation-wide context platforms.
+2. **Worktree isolation** — every session or workflow gets its own git
+   worktree and branch, so concurrent agents can work on the same repository
+   without sharing a working tree or overwriting each other. Each isolated
+   workspace exposes its base branch and commit, its session branch, changed
+   files, additions and deletions, the commits the agent created, and explicit
+   **keep** and **discard** actions. Khymeia never merges agent work
+   automatically.
+
+3. **Embedded terminal as the primary way to work** — run the harness's own
+   interactive interface inside Khymeia, in the session's worktree and with
+   its provider profile, instead of rebuilding its controls. Model, effort,
+   permission mode, `/compact`, `/context` all keep working, because it is the
+   real CLI; Khymeia owns and supervises the process, it does not replace the
+   interface.
+
+   Verified against the installed CLIs, and what makes this cheap:
+
+   - Claude Code accepts `--session-id <uuid>`, so Khymeia picks the
+     conversation id up front, for interactive and headless runs alike;
+   - `--no-session-persistence` only works with `--print`, so interactive
+     sessions are *always* saved to disk and can be resumed;
+   - Codex offers `resume <SESSION_ID>`, `fork`, and
+     `queue --thread <id> --message <text>` to inject a message into a live
+     session.
+
+   A session therefore moves between the interactive lane and the headless one
+   without losing the conversation — **take over** and **hand back**, never
+   both at once. Structured events stay the job of the headless lane: a PTY
+   carries bytes, not events, and audit loops cannot be built on terminal
+   output.
+
+   "State survives" means three separate things, and only two are free: the
+   *conversation* (the CLI persists it; Khymeia stores id, worktree and
+   profile), the *scrollback* (a bounded output buffer replayed on reattach)
+   and the *live process* (a child of the runtime dies with it — recovery is
+   relaunching with `--resume`, not keeping the process alive).
+
+   To be settled by a short spike before any code is written: a PTY helper
+   with window resizing (the BEAM has no PTY of its own); whether
+   `codex app-server` removes the need for a PTY on the Codex side; and
+   whether Claude Code hooks fire during interactive sessions and can keep the
+   timeline alive while the user types.
+
+4. **First-class changes and diffs** — make git state part of the session
+   rather than a hidden implementation detail, so a session answers one
+   question immediately: *what did this agent change?* Change counts on
+   session cards, file-by-file diffs, a cumulative diff against the session's
+   base commit, changes attributed to individual workflow steps, branch and
+   worktree status, and opening the worktree in a terminal or editor. Workflow
+   runs show both the total result and the changes introduced by individual
+   implement/fix steps.
+
+5. **Project and session workspace** — make active work the main view of
+   Khymeia. The shell (projects, sidebar, per-project overview, repository
+   tab) is in place; what remains depends on worktrees and diffs. A repository
+   should show its running, waiting and completed sessions together with their
+   harness, branch, worktree, change summary and current state, with multiple
+   agents visible side by side without reasoning about their processes.
+
+6. **More harness adapters** — Gemini CLI next, then GitHub Copilot CLI, Kiro
+   CLI and OpenCode, where their non-interactive and resume behaviour can be
+   verified reliably. Detection alone is not integration: every adapter must
+   document its actual capabilities, permissions, resume semantics and
+   limitations.
+
+7. **Continuity and session history** — persist activity beyond the current
+   in-memory event window and make interrupted work recoverable when the
+   harness supports it: persisted activity timelines, conversation
+   identifiers, interrupted-session recovery, usage and cost where the harness
+   exposes it, and durable branch/worktree metadata.
+
+8. **Cross-harness handoff** — allow a task to continue in another harness
+   without pretending native conversation identifiers are portable between
+   providers. A handoff creates a new session with explicit context derived
+   from the current work — original task, current objective, worktree and
+   branch, changed files and diff, completed work, relevant previous output,
+   open questions, verification state — and the receiving harness starts a new
+   native conversation over the same controlled workspace.
+
+9. **Implementers that verify** — give workflow roles explicit verification
+   capabilities instead of trusting completion claims: per-role allowed
+   commands, repository-defined verification commands, tests, linting and
+   build results captured as workflow events, results passed to auditors, and
+   a clear distinction between model claims and checks Khymeia actually ran.
+
+10. **Workflow evolution** — keep workflows deterministic while making them
+    more useful: reusable workflow definitions, additional reviewer and
+    planner role kinds, richer but still bounded conditions, step-level diffs
+    and verification, explicit human approval points, and comparison of
+    independent implementations without automatically choosing a winner.
+
+11. **Optional context integration** — let external repository-context tooling
+    prepare or synchronize harness-specific instructions before a session
+    starts, without making Khymeia responsible for organisation-wide
+    knowledge.
+
+Deliberately out of scope: a model or agent loop of Khymeia's own, direct
+model API calls, automatic task decomposition, autonomous model routing,
+automatic merging, remote execution, multi-user collaboration and
+organisation-wide context platforms.
+
+The developer remains responsible for choosing the harness, reviewing its work
+and deciding what reaches the repository's main branch.
 
 ## Why Elixir
 
