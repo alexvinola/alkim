@@ -27,6 +27,11 @@ defmodule Khymeia.Terminals.Server do
   @flush_ms 16
   @default_size {24, 80}
 
+  # A harness that cannot continue a conversation usually says so and exits
+  # at once. Within this window a failed resume is treated as "there was
+  # nothing to resume" rather than as the terminal being over.
+  @resume_grace_ms 8_000
+
   defmodule State do
     @moduledoc false
     defstruct [
@@ -35,6 +40,11 @@ defmodule Khymeia.Terminals.Server do
       :pending,
       :flush_timer,
       :log,
+      :launch,
+      :started_ms,
+      resumed?: false,
+      retried?: false,
+      stopping?: false,
       log_bytes: 0,
       scrollback: [],
       scrollback_bytes: 0,
@@ -95,11 +105,22 @@ defmodule Khymeia.Terminals.Server do
         env: env(launch)
       ])
 
-    state = %{state | port: port}
+    state = %{
+      state
+      | port: port,
+        launch: launch,
+        resumed?: resumed?(launch),
+        started_ms: System.monotonic_time(:millisecond)
+    }
+
     Port.command(port, <<?r, rows::16, cols::16>>)
 
     {:noreply, update(state, status: :running, started_at: DateTime.utc_now())}
   end
+
+  # Only Claude Code echoes back a chosen id; for the others a resume is an
+  # argument we passed, so ask the adapter's own args.
+  defp resumed?(launch), do: Enum.any?(launch.args, &(&1 in ["--resume", "resume"]))
 
   @impl true
   def handle_cast({:keys, data}, %State{port: port} = state) when is_port(port) do
@@ -126,7 +147,7 @@ defmodule Khymeia.Terminals.Server do
 
   def handle_call(:stop, _from, %State{port: port} = state) when is_port(port) do
     Port.command(port, <<?k>>)
-    {:reply, :ok, state}
+    {:reply, :ok, %{state | stopping?: true}}
   end
 
   def handle_call(:stop, _from, state), do: {:reply, :ok, state}
@@ -180,7 +201,41 @@ defmodule Khymeia.Terminals.Server do
 
   defp finish(state, code) do
     state = flush(state)
-    update(state, status: :exited, exit_code: code, completed_at: DateTime.utc_now())
+
+    if retry_without_resume?(state, code),
+      do: relaunch(state),
+      else: update(state, status: :exited, exit_code: code, completed_at: DateTime.utc_now())
+  end
+
+  # Only when the harness itself gave up on the conversation: not when the
+  # user pressed Stop, and not when a signal ended it (128 + signal), which
+  # means something killed it rather than it refusing to resume.
+  defp retry_without_resume?(state, code) do
+    state.resumed? and not state.retried? and not state.stopping? and code != 0 and
+      code < 128 and
+      System.monotonic_time(:millisecond) - (state.started_ms || 0) < @resume_grace_ms
+  end
+
+  # The conversation could not be continued. Rather than leaving a terminal
+  # that died on arrival, start a fresh one in the same place and say so —
+  # the user asked for a terminal, not for an error message.
+  defp relaunch(state) do
+    case Terminals.fresh_launch(state.terminal) do
+      {:ok, launch} ->
+        note(state, "could not continue the previous conversation; starting a new one")
+        state = %{state | retried?: true, port: nil}
+        {:noreply, state} = handle_continue({:spawn, launch}, state)
+        state
+
+      _ ->
+        update(state, status: :exited, exit_code: 1, completed_at: DateTime.utc_now())
+    end
+  end
+
+  defp note(state, text) do
+    line = "\r\n\e[2m[khymeia] " <> text <> "\e[0m\r\n"
+    Terminals.broadcast(state.terminal.id, {:terminal_output, state.terminal.id, line})
+    Log.write(state.log, line)
   end
 
   defp update(state, attrs) do

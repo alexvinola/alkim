@@ -44,6 +44,15 @@ done
 prompt="$*"
 
 if [ "$interactive" = "1" ]; then
+  # A reference starting with "missing-" stands in for a conversation the CLI
+  # cannot find, which is how a real harness refuses to resume.
+  case "$resume" in
+    missing-*)
+      echo "No conversation found with session ID: $resume"
+      exit 1
+      ;;
+  esac
+
   if [ -t 0 ]; then tty_state="tty"; else tty_state="not-a-tty"; fi
   echo "fake harness interactive on $tty_state"
   echo "size $(stty size 2>/dev/null || echo unknown)"

@@ -39,9 +39,9 @@ defmodule KhymeiaWeb.ProjectLiveTest do
   end
 
   test "a terminal keeps its output after its process is gone", %{conn: conn, project: project} do
-    {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}/terminal")
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}")
 
-    view |> form("#open-terminal-tab", terminal: %{harness: "fake"}) |> render_submit()
+    view |> form("#open-terminal", terminal: %{harness: "fake"}) |> render_submit()
     [terminal] = Khymeia.Terminals.list_for_project(project.id)
 
     eventually(fn -> Khymeia.Terminals.attach(terminal.id) |> elem(2) =~ "fake>" end)
@@ -71,16 +71,38 @@ defmodule KhymeiaWeb.ProjectLiveTest do
 
   # The test workspaces live inside this repository, so git has something to
   # say about them; a folder outside any repository renders the other branch.
+  # handle_params runs on the disconnected render too, and starting an OS
+  # process there would launch the harness twice for one terminal.
+  test "a page load never starts a terminal twice", %{conn: conn, project: project} do
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}")
+    view |> form("#open-terminal", terminal: %{harness: "fake"}) |> render_submit()
+    [terminal] = Khymeia.Terminals.list_for_project(project.id)
+
+    Khymeia.Terminals.stop(terminal.id)
+    eventually(fn -> not Khymeia.Terminals.alive?(terminal.id) end)
+
+    # The static render alone must not bring the harness back.
+    static = get(conn, ~p"/projects/#{project.id}/terminal?t=#{terminal.id}")
+    assert html_response(static, 200)
+    refute Khymeia.Terminals.alive?(terminal.id)
+
+    # Connecting does, exactly once.
+    {:ok, _view, _html} = live(conn, ~p"/projects/#{project.id}/terminal?t=#{terminal.id}")
+    eventually(fn -> Khymeia.Terminals.alive?(terminal.id) end)
+    assert [_one] = Khymeia.Terminals.list_for_project(project.id)
+  end
+
   test "deleting a terminal from the UI removes its saved output", %{
     conn: conn,
     project: project
   } do
-    {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}/terminal")
-    view |> form("#open-terminal-tab", terminal: %{harness: "fake"}) |> render_submit()
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}")
+    view |> form("#open-terminal", terminal: %{harness: "fake"}) |> render_submit()
     [terminal] = Khymeia.Terminals.list_for_project(project.id)
     path = Khymeia.Terminals.Log.path(terminal.id)
     eventually(fn -> File.exists?(path) end)
 
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}/terminal?t=#{terminal.id}")
     view |> element("#delete-terminal") |> render_click()
 
     assert Khymeia.Terminals.get(terminal.id) == nil

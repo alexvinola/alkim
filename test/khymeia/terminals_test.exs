@@ -135,6 +135,27 @@ defmodule Khymeia.TerminalsTest do
     refute Terminals.alive?(terminal.id)
   end
 
+  test "a conversation that cannot be resumed still leaves a usable terminal" do
+    workspace = workspace!()
+
+    {:ok, terminal} =
+      Terminals.start(%{
+        "harness" => "fake",
+        "workspace" => workspace,
+        "resume" => "missing-#{System.unique_integer([:positive])}"
+      })
+
+    :ok = Terminals.subscribe(terminal.id)
+
+    # The harness refuses and exits; Khymeia says so and starts a fresh one
+    # rather than handing back a terminal that died on arrival.
+    assert await_output(terminal.id, "could not continue") =~ "[khymeia]"
+    assert await_output(terminal.id, "fake>") =~ "interactive on tty"
+
+    eventually(fn -> Terminals.alive?(terminal.id) end)
+    assert Terminals.get(terminal.id).status == :running
+  end
+
   test "a workspace outside the allowed roots is refused" do
     assert {:error, {:invalid, %{workspace: _}}} =
              Terminals.start(%{"harness" => "fake", "workspace" => "/etc"})

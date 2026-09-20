@@ -46,7 +46,9 @@ defmodule Khymeia.Terminals do
     with {:ok, workspace} <- workspace(attrs),
          {:ok, harness, profile} <- harness(attrs),
          :ok <- supports_interactive(harness),
-         {:ok, provider} <- resolve(profile) do
+         # Resolve the credential before recording anything, so a broken
+         # provider profile does not leave a terminal that never started.
+         {:ok, _provider} <- resolve(profile) do
       project = Khymeia.Projects.ensure_for_workspace(workspace)
       Khymeia.Projects.touch(project)
 
@@ -58,31 +60,86 @@ defmodule Khymeia.Terminals do
         provider_profile_id: profile && profile.id,
         model: attrs.model,
         permission_mode: attrs.permission_mode,
-        # Claude Code lets Khymeia choose the conversation id up front; the
-        # adapter says so by echoing it back in the launch.
         harness_ref: attrs.resume,
         status: :starting
       }
 
-      session = %{
-        workspace: workspace,
-        executable: harness.executable,
-        model: attrs.model,
-        permission_mode: attrs.permission_mode,
-        resume: attrs.resume,
-        session_id: terminal.id,
-        provider: provider
+      with {:ok, terminal} <- insert(terminal), do: run(terminal, attrs.resume)
+    end
+  end
+
+  @doc """
+  Puts a process back on an existing terminal, asking the harness to continue
+  the conversation it already has.
+
+  Reopening keeps the same terminal — same id, same saved output — because a
+  terminal *is* the conversation as far as the user is concerned. There is no
+  separate "resume" step: opening one that is not running resumes it, and you
+  type.
+  """
+  @spec reopen(String.t()) :: {:ok, Terminal.t()} | {:error, start_error()}
+  def reopen(id) do
+    case get(id) do
+      nil -> {:error, {:invalid, %{terminal: "that terminal no longer exists"}}}
+      terminal -> if alive?(id), do: {:ok, terminal}, else: run(terminal, resume_ref(terminal))
+    end
+  end
+
+  # Claude Code names conversations by an id Khymeia chose; Codex only offers
+  # "the most recent one in this workspace".
+  defp resume_ref(%Terminal{harness_ref: ref}) when is_binary(ref), do: ref
+  defp resume_ref(_terminal), do: "last"
+
+  @doc false
+  def run(%Terminal{} = terminal, resume) do
+    with {:ok, harness, profile} <- harness(%{harness: harness_choice(terminal)}),
+         :ok <- supports_interactive(harness),
+         {:ok, provider} <- resolve(profile),
+         {:ok, launch} <- build(terminal, harness, provider, resume) do
+      terminal = %{
+        terminal
+        | harness_ref: launch[:harness_ref] || terminal.harness_ref,
+          status: :starting,
+          exit_code: nil,
+          completed_at: nil
       }
 
-      with {:ok, launch} <- harness.adapter.build_interactive(session),
-           terminal = %{terminal | harness_ref: launch[:harness_ref] || terminal.harness_ref},
-           {:ok, terminal} <- insert(terminal),
-           {:ok, _pid} <-
-             Khymeia.Terminals.Supervisor.start_terminal(terminal: terminal, launch: launch) do
-        {:ok, terminal}
+      save(terminal)
+
+      case Khymeia.Terminals.Supervisor.start_terminal(terminal: terminal, launch: launch) do
+        {:ok, _pid} -> {:ok, terminal}
+        error -> error
       end
     end
   end
+
+  @doc """
+  How to start this terminal from scratch, ignoring any conversation it was
+  meant to continue. Used when resuming turns out to be impossible.
+  """
+  @spec fresh_launch(Terminal.t()) :: {:ok, map()} | {:error, term()}
+  def fresh_launch(%Terminal{} = terminal) do
+    with {:ok, harness, profile} <- harness(%{harness: harness_choice(terminal)}),
+         {:ok, provider} <- resolve(profile),
+         do: build(terminal, harness, provider, nil)
+  end
+
+  @doc false
+  def build(%Terminal{} = terminal, harness, provider, resume) do
+    harness.adapter.build_interactive(%{
+      workspace: terminal.workspace,
+      executable: harness.executable,
+      model: terminal.model,
+      permission_mode: terminal.permission_mode,
+      resume: resume,
+      session_id: terminal.id,
+      provider: provider
+    })
+  end
+
+  @doc false
+  def harness_choice(%Terminal{harness: harness, provider_profile_id: nil}), do: harness
+  def harness_choice(%Terminal{harness: harness, provider_profile_id: id}), do: "#{harness}@#{id}"
 
   @doc "Sends raw keystrokes. The bytes are not interpreted."
   def send_keys(id, data) when is_binary(data), do: with_terminal(id, &Server.send_keys(&1, data))

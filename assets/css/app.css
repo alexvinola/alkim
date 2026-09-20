@@ -234,7 +234,10 @@ body { font-family: var(--k-sans); font-size: 14px; line-height: 1.5; -webkit-fo
 .k-card-foot { display: flex; align-items: center; justify-content: space-between; }
 .k-card-project { min-height: 5.5rem; }
 
-.k-tabs-page { margin-bottom: 1.5rem; }
+.k-tabs-page { margin-bottom: 0; }
+.k-tabs-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; }
+.k-tab-actions { display: flex; align-items: center; gap: .4rem; }
+.k-btn-sm { height: 1.7rem; padding: 0 .55rem; font-size: 12px; }
 .k-row-change { grid-template-columns: 3rem minmax(0, 1fr); }
 .k-row-commit { grid-template-columns: 5rem minmax(0, 1fr) 10rem 7rem; }
 .k-change-M { color: var(--k-waiting); }
@@ -510,9 +513,9 @@ a.k-row:hover { background: var(--k-sunken); }
 }
 
 /* Embedded terminal */
-.k-term-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: .6rem; min-height: 0; }
+.k-term-shell { display: grid; min-height: 0; }
 .k-term-bar { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
-.k-term-tabs { display: flex; gap: .3rem; overflow-x: auto; }
+.k-term-tabs { display: flex; gap: .3rem; overflow-x: auto; margin-bottom: .6rem; padding-bottom: .2rem; }
 .k-term-tab {
   display: inline-flex; align-items: center; gap: .4rem; padding: .2rem .6rem; border-radius: 6px;
   border: 1px solid var(--k-border); background: var(--k-surface); color: var(--k-muted);
@@ -521,7 +524,7 @@ a.k-row:hover { background: var(--k-sunken); }
 .k-term-tab:hover { color: var(--k-text); }
 .k-term-tab-on { border-color: var(--k-accent); color: var(--k-text); background: var(--k-accent-soft); }
 .k-term-screen {
-  min-height: 24rem; height: 60vh; padding: .5rem; border-radius: 8px;
+  min-height: 26rem; height: 66vh; padding: .5rem; border-radius: 8px;
   background: var(--k-sunken); border: 1px solid var(--k-border);
 }
 .k-term-screen .xterm { height: 100%; }

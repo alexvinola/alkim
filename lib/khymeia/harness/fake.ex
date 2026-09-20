@@ -56,7 +56,9 @@ defmodule Khymeia.Harness.Fake do
   @doc """
   Interactive mode, used to exercise the pseudo-terminal path in tests
   without any real agent CLI: it reports whether it is on a tty, echoes what
-  is typed and exits on `exit`.
+  is typed and exits on `exit`. A resume reference starting with `missing-`
+  makes it refuse, the way a real harness does for a conversation it cannot
+  find.
   """
   @impl true
   def build_interactive(session) do

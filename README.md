@@ -45,7 +45,7 @@ Early and moving fast, but built to be trusted with real work:
 | Projects and shell (sidebar, per-project overview, repository tab) | working |
 | Embedded terminals (the harness's own TUI on a real pty) | working; verified end to end with the Claude Code TUI, including a model exchange |
 | Terminal output saved to disk | working; survives restarting the daemon |
-| Resuming a conversation from an embedded terminal | **not working yet** — see [Terminals](#terminals) |
+| Resuming a conversation from an embedded terminal | **not working yet** with Claude Code — see [Terminals](#terminals); reopening always gives a usable terminal |
 | Test suite | 141 tests, no agent CLI required ([CI](.github/workflows/ci.yml)) |
 | Packaging | OTP release works; Homebrew formula pending |
 
@@ -142,26 +142,27 @@ terminal shows whatever appeared on screen. So the directory is `0700`, each
 log is `0600` and capped at 1 MB, and *Delete* removes a terminal together
 with everything it printed. Set `:terminal_log_dir` to move them elsewhere.
 
-**Continuing a conversation — what is and is not verified.** Claude Code
-accepts `--session-id <uuid>`, and the interactive CLI does take it: running
-one creates `~/.claude/session-env/<uuid>`. Khymeia therefore names the
-conversation before it exists and *Resume conversation* passes that id back
-as `--resume`.
+**Continuing a conversation.** There is no separate "resume" step: opening a
+terminal that is not running puts a process back on it, asking the harness to
+continue where it left off, and you type. It is the same terminal — same id,
+same saved output — because a terminal *is* the conversation as far as the
+user is concerned.
 
-What could **not** be made to work against Claude Code 2.1.212: after a real
+When the harness cannot continue (it says so and exits at once), Khymeia
+prints a line saying so and starts a fresh one in the same place, rather than
+handing back a terminal that died on arrival. A stop you asked for, or a
+harness killed by a signal, never triggers that.
+
+**What could not be made to work** against Claude Code 2.1.212: after a real
 exchange in an embedded terminal, no conversation file appeared under
 `~/.claude/projects/…`, and resuming that id found nothing to restore. This
-happened whether the terminal was ended with Khymeia's *Stop* (the CLI exits
-on `SIGTERM` in about half a second, so it is not being cut short) or with
-Ctrl-C twice from inside the TUI. Resuming a conversation **started in an
-embedded terminal does not work yet**; the button is there because it does
-work for conversations the CLI itself has saved, and because the id plumbing
-is the part Khymeia owns. Investigating where the interactive CLI persists a
-conversation is the next step for this feature.
-
-Codex does not accept a caller-chosen id at all, so resuming there uses its
-own `resume --last` for that workspace. This path has not been exercised
-either.
+held whether the terminal ended with *Stop* (the CLI exits on `SIGTERM` in
+about half a second), with Ctrl-C twice from inside the TUI, or after waiting
+twenty seconds in case the write was deferred. `--session-id <uuid>` *is*
+accepted — it creates `~/.claude/session-env/<uuid>` — so Khymeia names the
+conversation correctly; where the interactive CLI persists one is still an
+open question. Codex accepts no caller-chosen id at all, so it resumes with
+its own `resume --last` for that workspace; that path is untested.
 
 **What survives, and what does not.** The *conversation* is persisted by the
 harness itself; Khymeia stores its id, workspace and provider profile. The
