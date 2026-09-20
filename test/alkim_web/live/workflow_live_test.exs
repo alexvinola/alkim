@@ -102,7 +102,9 @@ defmodule AlkimWeb.WorkflowLiveTest do
     eventually(fn -> has_element?(view, "#workflow-status", "completed") end)
   end
 
-  test "the sessions view lists workflows and the sessions show their role", %{conn: conn} do
+  # A run with three roles would otherwise fill the list with four entries:
+  # itself plus one per agent. The run stands for the agents inside it.
+  test "a workflow's agents are shown by the workflow, not beside it", %{conn: conn} do
     run =
       start_workflow!(workspace!(), %{implementer: "hang", advisor: nil}, %{
         workflow: "simple-coding"
@@ -110,8 +112,12 @@ defmodule AlkimWeb.WorkflowLiveTest do
 
     {:ok, view, _html} = live(conn, ~p"/sessions")
 
-    eventually(fn -> has_element?(view, "#workflow-#{run.id}") end)
-    eventually(fn -> render(view) =~ "implementer" end)
+    eventually(fn -> has_element?(view, "#workflow-#{run.id}", "agent(s)") end)
+
+    # The implementer is running, but it has no entry of its own.
+    assert [agent] = Alkim.Runtime.list_live()
+    assert agent.metadata["role"] == "implementer"
+    refute has_element?(view, "#session-#{agent.id}")
 
     Workflow.stop(run.id)
     eventually(fn -> has_element?(view, "#workflow-#{run.id}", "stopped") end)

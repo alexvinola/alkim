@@ -85,6 +85,7 @@ defmodule AlkimWeb.SessionComponents do
       <p class="a-card-title">{@entry.title}</p>
       <div class="a-card-meta">
         <span class="a-tag">{@entry.label}</span>
+        <span :if={@entry.children > 0} class="a-tag">{@entry.children} agent(s)</span>
         <span :if={@entry.tag} class="a-tag">{@entry.tag}</span>
         <span :if={@entry.detail} class="a-mono a-faint a-truncate">{@entry.detail}</span>
       </div>
@@ -110,6 +111,7 @@ defmodule AlkimWeb.SessionComponents do
     <.link navigate={@entry.path} id={@id || "row-#{@entry.id}"} class="a-row a-row-session">
       <span>
         {@entry.label}
+        <span :if={@entry.children > 0} class="a-tag">{@entry.children} agent(s)</span>
         <span :if={@entry.tag} class="a-tag">{@entry.tag}</span>
       </span>
       <span class="a-truncate">{@entry.title}</span>

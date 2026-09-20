@@ -272,7 +272,8 @@ defmodule AlkimWeb.ProjectLive do
         terminals
 
     history = Enum.reject(history, &MapSet.member?(live_ids, &1.id))
-    {active, recent} = Enum.split_with(WorkEntry.sort(live ++ history), & &1.active?)
+    grouped = (live ++ history) |> WorkEntry.group() |> WorkEntry.sort()
+    {active, recent} = Enum.split_with(grouped, & &1.active?)
 
     assign(socket, active: active, recent: recent, sidebar: Enum.take(active ++ recent, 12))
   end

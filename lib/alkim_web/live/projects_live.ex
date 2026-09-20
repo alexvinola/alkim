@@ -69,7 +69,7 @@ defmodule AlkimWeb.ProjectsLive do
       |> Enum.filter(&Workflow.Run.active?/1)
       |> Enum.map(&WorkEntry.from_run/1)
 
-    assign(socket, active: WorkEntry.sort(live ++ workflows))
+    assign(socket, active: (live ++ workflows) |> WorkEntry.group() |> WorkEntry.sort())
   end
 
   defp error_message(changeset) do

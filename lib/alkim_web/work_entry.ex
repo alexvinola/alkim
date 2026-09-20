@@ -21,6 +21,8 @@ defmodule AlkimWeb.WorkEntry do
           detail: String.t() | nil,
           workspace: String.t() | nil,
           path: String.t(),
+          owner_id: String.t() | nil,
+          children: non_neg_integer(),
           started_at: DateTime.t() | nil,
           completed_at: DateTime.t() | nil
         }
@@ -38,6 +40,8 @@ defmodule AlkimWeb.WorkEntry do
       detail: Map.get(session, :model),
       workspace: Map.get(session, :workspace),
       path: ~p"/sessions/#{session.id}",
+      owner_id: Map.get(session, :metadata, %{})["workflow_id"],
+      children: 0,
       started_at: Map.get(session, :started_at),
       completed_at: Map.get(session, :completed_at)
     }
@@ -61,6 +65,8 @@ defmodule AlkimWeb.WorkEntry do
       detail: nil,
       workspace: terminal.workspace,
       path: ~p"/projects/#{terminal.project_id}/terminal?#{[t: terminal.id]}",
+      owner_id: nil,
+      children: 0,
       started_at: terminal.started_at || terminal.inserted_at,
       completed_at: terminal.completed_at
     }
@@ -79,9 +85,33 @@ defmodule AlkimWeb.WorkEntry do
       detail: step_detail(run),
       workspace: run.workspace,
       path: ~p"/workflows/#{run.id}",
+      owner_id: nil,
+      children: 0,
       started_at: run.started_at,
       completed_at: run.completed_at
     }
+  end
+
+  @doc """
+  Folds the agents a workflow is running into the workflow itself.
+
+  A run with three roles would otherwise appear four times in one list: the
+  run, plus a card for each agent it started. Work that belongs to a parent
+  is shown by its parent, and the parent says how many are inside. An agent
+  whose run is not in this list keeps its own entry, so nothing disappears.
+  """
+  @spec group([t()]) :: [t()]
+  def group(entries) do
+    owners = MapSet.new(entries, & &1.id)
+    {owned, loose} = Enum.split_with(entries, &(&1.owner_id && &1.owner_id in owners))
+    counts = Enum.frequencies_by(owned, & &1.owner_id)
+
+    Enum.map(loose, fn entry ->
+      case counts[entry.id] do
+        nil -> entry
+        n -> %{entry | children: n}
+      end
+    end)
   end
 
   @doc "Active work first, then the rest, each newest first."
