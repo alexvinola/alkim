@@ -9,7 +9,7 @@ defmodule AlkimWeb.Layouts do
   """
   use AlkimWeb, :html
 
-  import AlkimWeb.SessionComponents, only: [status: 1]
+  import AlkimWeb.SessionComponents, only: [status: 1, kind_icon: 1]
 
   # Embed all files in layouts/* within this module.
   # The default root.html.heex file contains the HTML
@@ -95,6 +95,7 @@ defmodule AlkimWeb.Layouts do
               id={"nav-entry-#{entry.id}"}
               class="a-side-entry"
             >
+              <.icon name={kind_icon(entry.kind)} class="size-3.5 a-faint" />
               <span class="a-truncate">{entry.title}</span>
               <.status status={entry.status} />
             </.link>

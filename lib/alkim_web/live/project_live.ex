@@ -412,24 +412,6 @@ defmodule AlkimWeb.ProjectLive do
         <.terminal_controls :if={@tab == "terminal"} terminal={@terminal} />
       </div>
 
-      <div :if={@tab == "terminal" and @terminals != []} class="a-term-tabs">
-        <button
-          :for={entry <- @terminals}
-          type="button"
-          phx-click="select_terminal"
-          phx-value-id={entry.id}
-          id={"term-tab-#{entry.id}"}
-          class={[
-            "a-term-tab",
-            @terminal && @terminal.id == entry.id && "a-term-tab-on",
-            not Alkim.Terminals.Terminal.live?(entry) && "a-term-dead"
-          ]}
-        >
-          <span class={["a-dot", live_dot(entry)]}></span>
-          {harness_label(entry.harness)}
-        </button>
-      </div>
-
       <.overview :if={@tab == "overview"} {assigns} />
       <.terminal_tab :if={@tab == "terminal"} {assigns} />
       <.git_tab :if={@tab == "git"} {assigns} />
@@ -593,7 +575,7 @@ defmodule AlkimWeb.ProjectLive do
       </div>
 
       <div :if={@terminal == nil and @terminal_options != []} class="a-panel a-empty">
-        Pick a terminal from this project, or open one from the <.link
+        Pick a terminal from the list on the left, or open one from the <.link
           patch={~p"/projects/#{@project.id}/overview"}
           class="a-link"
         >Overview</.link>.
@@ -642,9 +624,6 @@ defmodule AlkimWeb.ProjectLive do
     </div>
     """
   end
-
-  defp live_dot(entry),
-    do: if(Alkim.Terminals.Terminal.live?(entry), do: "a-dot-on", else: "a-dot-off")
 
   defp harness_label(id) do
     case Alkim.Harness.fetch_adapter(id) do

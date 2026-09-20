@@ -80,7 +80,7 @@ defmodule AlkimWeb.SessionComponents do
     <.link navigate={@entry.path} id={"card-#{@entry.id}"} class="a-card">
       <div class="a-card-head">
         <.status status={@entry.status} />
-        <.icon :if={kind_icon(@entry.kind)} name={kind_icon(@entry.kind)} class="size-3.5 a-faint" />
+        <.icon name={kind_icon(@entry.kind)} class="size-3.5 a-faint" />
       </div>
       <p class="a-card-title">{@entry.title}</p>
       <div class="a-card-meta">
@@ -128,9 +128,10 @@ defmodule AlkimWeb.SessionComponents do
     """
   end
 
-  defp kind_icon(:workflow), do: "hero-square-3-stack-3d"
-  defp kind_icon(:terminal), do: "hero-command-line"
-  defp kind_icon(_), do: nil
+  @doc "The icon that tells a terminal from a session or a workflow run."
+  def kind_icon(:workflow), do: "hero-square-3-stack-3d"
+  def kind_icon(:terminal), do: "hero-command-line"
+  def kind_icon(_), do: "hero-chat-bubble-left-right"
 
   attr :id, :string, required: true
   attr :since, :any, required: true
