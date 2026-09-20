@@ -219,7 +219,8 @@ defmodule Alkim.Runtime.SessionServer do
       executable: state.executable,
       model: session.model,
       permission_mode: session.permission_mode,
-      resume: resume
+      resume: resume,
+      session_id: session.id
     }
 
     # The provider's secret is resolved per turn and only ever placed in the

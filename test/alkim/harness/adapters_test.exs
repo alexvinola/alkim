@@ -46,6 +46,20 @@ defmodule Alkim.Harness.AdaptersTest do
                launch.args
     end
 
+    # The same conversation has to be reachable from both lanes, so Alkim
+    # names it on the first turn instead of learning the harness's own id.
+    test "names the conversation on the first turn and resumes it afterwards" do
+      {:ok, %{args: args}} = Claude.build_command(Map.put(@turn, :session_id, "the-uuid"))
+      assert "--session-id" in args and "the-uuid" in args
+      refute "--resume" in args
+
+      {:ok, %{args: args}} =
+        Claude.build_command(%{@turn | resume: "earlier"} |> Map.put(:session_id, "the-uuid"))
+
+      assert ["--resume", "earlier"] = Enum.take(args, -4) |> Enum.take(2)
+      refute "--session-id" in args
+    end
+
     test "adds model, permission mode and resume only when given" do
       turn = %{@turn | model: "opus", permission_mode: "plan", resume: "abc"}
       {:ok, %{args: args}} = Claude.build_command(turn)

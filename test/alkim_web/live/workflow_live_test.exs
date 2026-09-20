@@ -4,7 +4,14 @@ defmodule AlkimWeb.WorkflowLiveTest do
   import Phoenix.LiveViewTest
 
   import Alkim.RuntimeCase,
-    only: [workspace!: 0, start_workflow!: 3, await_workflow: 2, eventually: 1, pick_workspace: 2]
+    only: [
+      workspace!: 0,
+      start_workflow!: 3,
+      await_workflow: 2,
+      eventually: 1,
+      eventually: 2,
+      pick_workspace: 2
+    ]
 
   alias Alkim.Workflow
 
@@ -85,6 +92,30 @@ defmodule AlkimWeb.WorkflowLiveTest do
     assert [implementer] = Enum.filter(agents, &(&1.role == "implementer"))
     assert implementer.steps == 2
     assert [%{steps: 1}, %{steps: 1}] = Enum.filter(agents, &(&1.role == "auditor"))
+  end
+
+  # Two clients on one conversation is how you corrupt it, so the CLI can
+  # only be opened on an agent that is not mid-turn.
+  test "the CLI cannot be opened on an agent that is working", %{conn: conn} do
+    run =
+      start_workflow!(workspace!(), %{implementer: "hang", advisor: nil}, %{
+        workflow: "simple-coding"
+      })
+
+    # "step.started" fires before the step has a session, and an agent *is*
+    # its session, so wait for that rather than for the step.
+    eventually(fn ->
+      {:ok, _run, steps} = Workflow.get(run.id)
+      Enum.any?(steps, & &1.session_id)
+    end)
+
+    {:ok, view, _html} = live(conn, ~p"/workflows/#{run.id}/agents")
+    assert render(view) =~ "open_agent_terminal"
+
+    html = view |> element(~s(button[phx-click="open_agent_terminal"])) |> render_click()
+    assert html =~ "mid-turn"
+
+    Workflow.stop(run.id)
   end
 
   test "a human answers a clarification from the run page", %{conn: conn} do

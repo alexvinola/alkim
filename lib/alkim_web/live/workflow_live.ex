@@ -16,7 +16,7 @@ defmodule AlkimWeb.WorkflowLive do
 
   import AlkimWeb.SessionComponents
 
-  alias Alkim.{Runtime, Workflow, Worktrees}
+  alias Alkim.{Runtime, Terminals, Workflow, Worktrees}
   alias Alkim.Runtime.Event
   alias Alkim.Workflow.{Role, Run, Timeline}
 
@@ -109,6 +109,51 @@ defmodule AlkimWeb.WorkflowLive do
   def handle_event("complete", _, socket),
     do: act(socket, Workflow.complete(socket.assigns.run.id))
 
+  @doc false
+  # Opens the harness's *own* interface on this agent's conversation. Never
+  # while the workflow is mid-turn on it: two clients on one conversation is
+  # how you corrupt it.
+  def handle_event("open_agent_terminal", %{"id" => session_id}, socket) do
+    agent = Enum.find(socket.assigns.agents, &(&1.session_id == session_id))
+
+    cond do
+      is_nil(agent) or is_nil(agent.harness_ref) ->
+        {:noreply,
+         put_flash(socket, :error, "This agent has no conversation the CLI can reopen yet.")}
+
+      agent.busy? ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "That agent is mid-turn. Wait for it to finish, or stop the run."
+         )}
+
+      true ->
+        attrs = %{
+          "harness" => agent.harness,
+          "worktree" => socket.assigns.run.worktree_id,
+          "workspace" => socket.assigns.run.workspace,
+          "model" => agent.model,
+          "resume" => agent.harness_ref
+        }
+
+        case Terminals.start(attrs) do
+          {:ok, terminal} ->
+            {:noreply,
+             push_navigate(socket,
+               to: ~p"/projects/#{socket.assigns.run.project_id}/terminal?t=#{terminal.id}"
+             )}
+
+          {:error, {:invalid, errors}} ->
+            {:noreply, put_flash(socket, :error, Enum.map_join(errors, "; ", fn {_, m} -> m end))}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, "Could not open the CLI: #{inspect(reason)}")}
+        end
+    end
+  end
+
   def handle_event("reply_change", %{"reply" => reply}, socket),
     do: {:noreply, assign(socket, reply: reply)}
 
@@ -132,10 +177,17 @@ defmodule AlkimWeb.WorkflowLive do
 
   defp reload(socket) do
     case Workflow.get(socket.assigns.run.id) do
-      {:ok, run, steps} -> assign_run(socket, run, steps)
+      {:ok, run, steps} -> socket |> assign_run(run, steps) |> follow_first_agent()
       :error -> socket
     end
   end
+
+  # A run usually has no agent yet when its page opens; the first one to
+  # start is the one to show.
+  defp follow_first_agent(%{assigns: %{tab: "agents", agent: nil}} = socket),
+    do: watch_agent(socket, default_agent(socket.assigns.agents))
+
+  defp follow_first_agent(socket), do: socket
 
   defp assign_run(socket, run, steps) do
     children = Enum.group_by(Enum.filter(steps, & &1.parent_id), & &1.parent_id)
@@ -181,6 +233,8 @@ defmodule AlkimWeb.WorkflowLive do
       %{
         session_id: session_id,
         workflow_id: latest.workflow_id,
+        harness_ref: harness_ref(session_id),
+        busy?: latest.status in [:running],
         role: latest.role,
         harness: latest.harness,
         model: latest.model,
@@ -192,6 +246,17 @@ defmodule AlkimWeb.WorkflowLive do
       }
     end)
     |> Enum.sort_by(& &1.started_at, {:asc, DateTime})
+  end
+
+  # The harness's own conversation id, which is what the real CLI resumes.
+  # Read from the record, never by calling the session process: this runs
+  # for every agent on every render, and a busy agent must not be able to
+  # stall the page that is watching it.
+  defp harness_ref(session_id) do
+    case Alkim.Sessions.get(session_id) do
+      %{harness_ref: ref} -> ref
+      nil -> nil
+    end
   end
 
   defp agent_label(%{role: role}) when is_binary(role) do
@@ -357,6 +422,15 @@ defmodule AlkimWeb.WorkflowLive do
             <span class="a-mono a-faint">{@agent_harness}</span>
             <.status status={@agent_session.status} />
             <span style="flex:1"></span>
+            <button
+              class="a-btn a-btn-sm"
+              phx-click="open_agent_terminal"
+              phx-value-id={@agent}
+              id={"open-cli-#{@agent}"}
+              title="Run the harness's own interface on this conversation"
+            >
+              Open in the CLI
+            </button>
             <.link navigate={~p"/sessions/#{@agent}"} class="a-hint a-link">Open on its own →</.link>
           </div>
 

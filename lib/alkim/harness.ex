@@ -71,6 +71,7 @@ defmodule Alkim.Harness do
           required(:model) => String.t() | nil,
           required(:permission_mode) => String.t() | nil,
           required(:resume) => String.t() | nil,
+          optional(:session_id) => String.t(),
           optional(:provider) => provider() | nil
         }
 

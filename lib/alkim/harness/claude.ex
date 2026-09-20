@@ -105,11 +105,22 @@ defmodule Alkim.Harness.Claude do
 
   @impl true
   def build_command(turn) do
+    # Alkim names the conversation on the first turn, so the same one can
+    # later be opened in the real CLI (`--resume <id>`) without having to
+    # learn an id the harness chose. Verified with Claude Code 2.1.212:
+    # `-p --session-id <uuid>` writes `<uuid>.jsonl`.
+    identity =
+      case {turn.resume, turn[:session_id]} do
+        {nil, id} when is_binary(id) -> ["--session-id", id]
+        {ref, _} when is_binary(ref) -> ["--resume", ref]
+        _ -> []
+      end
+
     args =
       ["-p", "--output-format", "stream-json", "--verbose"] ++
         opt("--model", turn.model) ++
         opt("--permission-mode", turn.permission_mode) ++
-        opt("--resume", turn.resume) ++
+        identity ++
         ["--", turn.prompt]
 
     {:ok, %{executable: turn.executable, args: args, env: env(turn[:provider])}}

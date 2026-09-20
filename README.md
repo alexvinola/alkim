@@ -134,6 +134,10 @@ own directory and its own branch, off the current `HEAD`.
   untracked files.
 - *Open terminal here* runs a harness inside the worktree. The terminal still
   belongs to the project, even though the directory sits next to it.
+- A worktree can start a **new branch** or check out an **existing** one. A
+  branch already checked out somewhere is offered as unavailable rather than
+  as a choice that fails on submit, because git refuses to have one branch in
+  two worktrees.
 - The **New session** and **New workflow** forms offer the same choice — the
   project folder, a fresh worktree, or one that already exists. A workflow
   run defaults to a fresh one, because several agents in one folder is
@@ -162,6 +166,9 @@ tabs over what the run is made of.
   output, and a picker to switch between them. The implementer opens first
   and is marked *main*, because it is the one a human talks to. Watching it
   receive the advisor's answer is the point: you see the agents talking.
+  **Open in the CLI** runs the harness's own interface on that agent's
+  conversation, in the run's worktree — but never while the agent is
+  mid-turn, because two clients on one conversation is how you corrupt it.
 - **Changes** — what the run did in its worktree. A run that works in the
   project folder says so instead, because there its changes cannot be told
   apart from anything else happening there.
@@ -205,6 +212,12 @@ Alkim owns the process, not the interface:
 terminal shows whatever appeared on screen. So the directory is `0700`, each
 log is `0600` and capped at 1 MB, and *Delete* removes a terminal together
 with everything it printed. Set `:terminal_log_dir` to move them elsewhere.
+
+**Alkim names the conversation, in both lanes.** Claude Code accepts
+`--session-id <uuid>` with `-p` as well as interactively — verified: a
+headless run writes `<uuid>.jsonl`. So a workflow agent driven headlessly can
+later be opened in the real CLI with `--resume <uuid>`, because Alkim chose
+the id rather than learning one the harness picked.
 
 **Continuing a conversation.** There is no separate "resume" step: opening a
 terminal that is not running puts a process back on it, asking the harness to
