@@ -161,8 +161,8 @@ body { font-family: var(--a-sans); font-size: 14px; line-height: 1.5; -webkit-fo
   display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 1rem;
   padding: 0 1rem; border-bottom: 1px solid var(--a-border); background: var(--a-surface);
 }
-.a-brand { display: flex; align-items: baseline; gap: .6rem; font-weight: 600; letter-spacing: -.01em; }
-.a-brand-mark { font-family: var(--a-mono); color: var(--a-accent); font-weight: 500; }
+.a-brand { display: flex; align-items: center; gap: .5rem; font-weight: 600; letter-spacing: -.01em; }
+.a-brand-mark { width: 1.25rem; height: 1.25rem; object-fit: contain; flex: none; }
 .a-topbar-right { display: flex; align-items: center; justify-content: flex-end; gap: .75rem; }
 
 .a-pills { display: inline-flex; gap: .15rem; padding: .15rem; border-radius: 999px; background: var(--a-sunken); }

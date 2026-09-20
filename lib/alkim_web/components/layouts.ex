@@ -36,7 +36,7 @@ defmodule AlkimWeb.Layouts do
     <div class="a-app">
       <header class="a-topbar">
         <.link navigate={~p"/"} class="a-brand">
-          <span class="a-brand-mark">⟁</span>
+          <img src={~p"/images/alkim-mark-180.png"} alt="" class="a-brand-mark" />
           <span>Alkim</span>
         </.link>
 
