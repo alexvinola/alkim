@@ -5,7 +5,7 @@ defmodule KhymeiaWeb.SessionsLive do
 
   import KhymeiaWeb.SessionComponents, only: [work_row: 1]
 
-  alias Khymeia.{Runtime, Workflow}
+  alias Khymeia.{Runtime, Terminals, Workflow}
   alias KhymeiaWeb.WorkEntry
 
   @impl true
@@ -13,6 +13,8 @@ defmodule KhymeiaWeb.SessionsLive do
     if connected?(socket) do
       Runtime.subscribe_sessions()
       Workflow.subscribe_all()
+      # Terminals are sessions too, so this view has to hear about them.
+      Terminals.subscribe_all()
     end
 
     {:ok, socket |> assign(page_title: "Sessions · Khymeia") |> load()}
@@ -31,7 +33,8 @@ defmodule KhymeiaWeb.SessionsLive do
 
     history =
       (Runtime.list_recent(25) |> Enum.map(&WorkEntry.from_session/1)) ++
-        (Workflow.list_recent(25) |> Enum.map(&WorkEntry.from_run/1))
+        (Workflow.list_recent(25) |> Enum.map(&WorkEntry.from_run/1)) ++
+        (Terminals.list_recent(25) |> Enum.map(&WorkEntry.from_terminal/1))
 
     history = Enum.reject(history, &MapSet.member?(live_ids, &1.id))
     {active, recent} = Enum.split_with(WorkEntry.sort(live ++ history), & &1.active?)
@@ -77,8 +80,10 @@ defmodule KhymeiaWeb.SessionsLive do
   # Workflow rows keep one id across both lists; sessions get a distinct
   # "recent-" id, which is what the history links are addressed by.
   defp id_for(%{kind: :workflow, id: id}), do: "workflow-#{id}"
+  defp id_for(%{kind: :terminal, id: id}), do: "terminal-#{id}"
   defp id_for(%{id: id}), do: "session-#{id}"
 
   defp recent_id(%{kind: :workflow, id: id}), do: "workflow-#{id}"
+  defp recent_id(%{kind: :terminal, id: id}), do: "terminal-#{id}"
   defp recent_id(%{id: id}), do: "recent-#{id}"
 end

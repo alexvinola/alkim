@@ -126,7 +126,13 @@ defmodule Khymeia.Projects do
       |> Enum.filter(&Khymeia.Workflow.Run.active?/1)
       |> Enum.map(& &1.project_id)
 
-    (sessions ++ workflows)
+    terminals =
+      Khymeia.Terminals.list_recent(50)
+      |> Enum.filter(&Khymeia.Terminals.Terminal.live?/1)
+      |> Enum.filter(&Khymeia.Terminals.alive?(&1.id))
+      |> Enum.map(& &1.project_id)
+
+    (sessions ++ workflows ++ terminals)
     |> Enum.reject(&is_nil/1)
     |> Enum.frequencies()
   end

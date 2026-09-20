@@ -11,7 +11,7 @@ defmodule KhymeiaWeb.WorkflowNewLive do
 
   alias KhymeiaWeb.WorkspacePicker
 
-  import KhymeiaWeb.SessionComponents, only: [mode_tabs: 1]
+  import KhymeiaWeb.SessionComponents, only: [mode_tabs: 1, worktree_field: 1]
 
   alias Khymeia.{Runtime, Workflow}
   alias Khymeia.Workflow.{Definition, Presets, Role}
@@ -28,6 +28,13 @@ defmodule KhymeiaWeb.WorkflowNewLive do
       "task" => "",
       "constraints" => "",
       "max_iterations" => to_string(preset.max_iterations),
+      # Runs put several agents in one place, so they are isolated by default
+      # — where the project allows it.
+      "worktree" =>
+        if(Khymeia.Worktrees.offer(default_workspace(params["project"])) == :ok,
+          do: "new",
+          else: ""
+        ),
       "roles" => default_roles(preset)
     }
 
@@ -104,7 +111,36 @@ defmodule KhymeiaWeb.WorkflowNewLive do
 
   defp assign_params(socket, params) do
     {:ok, preset} = Presets.fetch(params["workflow"])
-    assign(socket, params: params, preset: preset, form: to_form(params, as: :workflow))
+    unavailable = unavailable(params["workspace"])
+    params = reconcile_worktree(params, unavailable)
+
+    assign(socket,
+      params: params,
+      preset: preset,
+      worktrees: worktrees_for(params["workspace"]),
+      worktree_unavailable: unavailable,
+      form: to_form(params, as: :workflow)
+    )
+  end
+
+  # A choice that is no longer possible must not stay selected.
+  defp reconcile_worktree(params, unavailable) do
+    if unavailable && params["worktree"] == "new", do: %{params | "worktree" => ""}, else: params
+  end
+
+  defp unavailable(workspace) do
+    case Khymeia.Worktrees.offer(workspace) do
+      :ok -> nil
+      {:unavailable, reason} -> reason
+    end
+  end
+
+  # Only worktrees of the project the chosen workspace belongs to.
+  defp worktrees_for(workspace) do
+    case workspace && Khymeia.Projects.for_workspace(workspace) do
+      %{id: id} -> Khymeia.Worktrees.active_for_project(id)
+      _ -> []
+    end
   end
 
   defp default_roles(preset) do
@@ -158,6 +194,15 @@ defmodule KhymeiaWeb.WorkflowNewLive do
           name="workflow[workspace]"
           value={@params["workspace"]}
           error={@errors[:workspace]}
+        />
+
+        <.worktree_field
+          name="workflow[worktree]"
+          value={@params["worktree"]}
+          worktrees={@worktrees}
+          error={@errors[:worktree]}
+          unavailable={@worktree_unavailable}
+          hint="Runs put several agents in one place, so they get their own worktree by default: the auditor then sees exactly what the implementer changed. Khymeia never merges it."
         />
 
         <div class="k-field">

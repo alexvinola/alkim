@@ -65,6 +65,56 @@ defmodule Khymeia.Worktrees do
   end
 
   @doc """
+  Whether a fresh worktree could be created for `workspace`, and if not, why.
+
+  Asked before offering the choice: a form that defaults to isolation and
+  then fails on submit is worse than one that says up front that this
+  project cannot have it.
+  """
+  @spec offer(String.t() | nil) :: :ok | {:unavailable, String.t()}
+  def offer(nil), do: {:unavailable, "choose a workspace first"}
+
+  def offer(workspace) do
+    with {:ok, repository} <- repository(workspace),
+         {:ok, _base} <- base_commit(repository),
+         {:ok, _path} <- destination(repository, "probe") do
+      :ok
+    else
+      {:error, {:invalid, %{worktree: message}}} -> {:unavailable, message}
+    end
+  end
+
+  @doc """
+  Resolves the `worktree` choice that sessions, workflows and terminals all
+  accept:
+
+    * `nil` or `""` — run in the project's own folder;
+    * `"new"` — a fresh worktree, named after the work;
+    * an id — that worktree, if it is still active.
+
+  Returning `{:ok, nil}` means "no worktree", which is a valid answer and not
+  an error: isolation is offered, never imposed.
+  """
+  @spec claim(String.t() | nil, map() | nil, String.t() | nil) ::
+          {:ok, Worktree.t() | nil} | {:error, error()}
+  def claim(choice, project, name \\ nil)
+
+  def claim(choice, _project, _name) when choice in [nil, ""], do: {:ok, nil}
+
+  def claim("new", nil, _name),
+    do: {:error, {:invalid, %{worktree: "a worktree needs a project"}}}
+
+  def claim("new", project, name), do: create(project, name)
+
+  def claim(id, _project, _name) do
+    case get(id) do
+      %Worktree{status: :active} = worktree -> {:ok, worktree}
+      %Worktree{} -> {:error, {:invalid, %{worktree: "that worktree has been released"}}}
+      nil -> {:error, {:invalid, %{worktree: "unknown worktree"}}}
+    end
+  end
+
+  @doc """
   Removes the directory and leaves the branch: the work stays in git, ready
   for you to review and merge yourself.
   """

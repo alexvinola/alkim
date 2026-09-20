@@ -94,6 +94,79 @@ defmodule Khymeia.WorktreesTest do
     assert message =~ "released"
   end
 
+  test "a session can claim a fresh worktree and runs inside it", %{project: project} do
+    {:ok, session} =
+      Khymeia.Runtime.start_session(%{
+        "harness" => "fake",
+        "workspace" => project.path,
+        "prompt" => "isolate this work please",
+        "worktree" => "new"
+      })
+
+    assert [worktree] = Worktrees.list_for_project(project.id)
+    assert session.workspace == worktree.path
+    assert session.worktree_id == worktree.id
+    assert session.project_id == project.id
+    # The branch is named after the prompt, so it is recognisable in git.
+    assert worktree.branch =~ "isolate-this-work"
+
+    Khymeia.Runtime.stop_session(session.id)
+  end
+
+  test "an existing worktree can be reused instead of making another", %{project: project} do
+    {:ok, worktree} = Worktrees.create(project, "shared")
+
+    {:ok, session} =
+      Khymeia.Runtime.start_session(%{
+        "harness" => "fake",
+        "workspace" => project.path,
+        "prompt" => "reuse it",
+        "worktree" => worktree.id
+      })
+
+    assert session.workspace == worktree.path
+    assert [_only_one] = Worktrees.list_for_project(project.id)
+
+    Khymeia.Runtime.stop_session(session.id)
+  end
+
+  test "asking for isolation where it is impossible is refused, not improvised" do
+    plain = workspace!()
+
+    assert {:error, {:invalid, %{worktree: message}}} =
+             Khymeia.Runtime.start_session(%{
+               "harness" => "fake",
+               "workspace" => plain,
+               "prompt" => "nowhere to isolate",
+               "worktree" => "new"
+             })
+
+    assert message =~ "not inside the allowed workspace roots"
+    assert Khymeia.Runtime.list_live() == []
+  end
+
+  test "a workflow run gets its own worktree, so roles cannot collide", %{project: project} do
+    run =
+      Khymeia.RuntimeCase.start_workflow!(
+        project.path,
+        %{implementer: "success", advisor: nil, auditor: "audit-pass"},
+        %{workflow: "coding-with-audit", worktree: "new", task: "add a greeting"}
+      )
+
+    assert [worktree] = Worktrees.list_for_project(project.id)
+    assert run.workspace == worktree.path
+    assert run.worktree_id == worktree.id
+    assert worktree.branch =~ "add-a-greeting"
+
+    Khymeia.Workflow.stop(run.id)
+  end
+
+  test "offer/1 says whether isolation is possible before it is chosen", %{project: project} do
+    assert :ok = Worktrees.offer(project.path)
+    assert {:unavailable, reason} = Worktrees.offer(workspace!())
+    assert reason =~ "workspace roots"
+  end
+
   defp branches(repository) do
     {out, 0} =
       System.cmd(System.find_executable("git"), [

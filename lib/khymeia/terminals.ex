@@ -200,6 +200,11 @@ defmodule Khymeia.Terminals do
     end
   end
 
+  @doc "Recently opened terminals across every project, newest first."
+  def list_recent(limit \\ 20) do
+    Terminal |> order_by(desc: :inserted_at) |> limit(^limit) |> Repo.all()
+  end
+
   @doc "Terminals of a project, live ones first."
   def list_for_project(project_id, limit \\ 20) do
     Terminal
@@ -267,8 +272,21 @@ defmodule Khymeia.Terminals do
   def subscribe(id), do: Phoenix.PubSub.subscribe(@pubsub, topic(id))
   def unsubscribe(id), do: Phoenix.PubSub.unsubscribe(@pubsub, topic(id))
 
+  @doc """
+  Lifecycle of every terminal, for views that list them all. Output is not
+  broadcast here: only the view showing a terminal should carry its bytes.
+  """
+  def subscribe_all, do: Phoenix.PubSub.subscribe(@pubsub, "terminals")
+
   @doc false
   def broadcast(id, message), do: Phoenix.PubSub.broadcast(@pubsub, topic(id), message)
+
+  @doc false
+  def broadcast_status(id, message) do
+    broadcast(id, message)
+    Phoenix.PubSub.broadcast(@pubsub, "terminals", message)
+    Khymeia.Runtime.EventBus.broadcast_nav()
+  end
 
   defp topic(id), do: "terminal:" <> id
 
@@ -297,14 +315,9 @@ defmodule Khymeia.Terminals do
     end
   end
 
-  defp worktree(%{worktree: nil}), do: {:ok, nil}
-
-  defp worktree(%{worktree: id}) do
-    case Khymeia.Worktrees.get(id) do
-      %{status: :active} = worktree -> {:ok, worktree}
-      %{} -> invalid(:worktree, "that worktree has been released")
-      nil -> invalid(:worktree, "unknown worktree")
-    end
+  defp worktree(%{worktree: choice, workspace: workspace}) do
+    project = choice == "new" && Khymeia.Projects.ensure_for_workspace(workspace)
+    Khymeia.Worktrees.claim(choice, project || nil)
   end
 
   defp harness(%{harness: choice}) do

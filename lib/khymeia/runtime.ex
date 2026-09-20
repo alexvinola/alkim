@@ -55,46 +55,63 @@ defmodule Khymeia.Runtime do
         end
 
       project = Khymeia.Projects.ensure_for_workspace(params.workspace)
-      Khymeia.Projects.touch(project)
 
-      session = %Session{
-        id: Ecto.UUID.generate(),
-        harness: harness.id,
-        workspace: params.workspace,
-        project_id: project && project.id,
-        prompt: params.prompt,
-        model: params.model,
-        permission_mode: params.permission_mode,
-        metadata: metadata
-      }
+      with {:ok, worktree} <-
+             Khymeia.Worktrees.claim(params.worktree, project, title(params.prompt)) do
+        # An isolated session runs in the worktree, not in the project folder.
+        workspace = if worktree, do: worktree.path, else: params.workspace
 
-      server_opts =
-        [
-          session: session,
-          adapter: harness.adapter,
-          executable: harness.executable,
-          provider_profile: params.profile && params.profile.id
-        ] ++ opts
+        project =
+          if worktree, do: Khymeia.Projects.get(worktree.project_id) || project, else: project
 
-      with {:ok, _record} <- Sessions.create(session) do
-        case SessionSupervisor.start_session(server_opts) do
-          {:ok, pid} ->
-            {:ok, %{session | pid: pid}}
+        Khymeia.Projects.touch(project)
 
-          {:error, reason} ->
-            error = "could not start session: #{inspect(reason)}"
+        session = %Session{
+          id: Ecto.UUID.generate(),
+          harness: harness.id,
+          workspace: workspace,
+          project_id: project && project.id,
+          worktree_id: worktree && worktree.id,
+          prompt: params.prompt,
+          model: params.model,
+          permission_mode: params.permission_mode,
+          metadata: metadata
+        }
 
-            Sessions.sync(%{
-              session
-              | status: :failed,
-                error: error,
-                completed_at: DateTime.utc_now()
-            })
+        server_opts =
+          [
+            session: session,
+            adapter: harness.adapter,
+            executable: harness.executable,
+            provider_profile: params.profile && params.profile.id
+          ] ++ opts
 
-            {:error, reason}
+        with {:ok, _record} <- Sessions.create(session) do
+          case SessionSupervisor.start_session(server_opts) do
+            {:ok, pid} ->
+              {:ok, %{session | pid: pid}}
+
+            {:error, reason} ->
+              error = "could not start session: #{inspect(reason)}"
+
+              Sessions.sync(%{
+                session
+                | status: :failed,
+                  error: error,
+                  completed_at: DateTime.utc_now()
+              })
+
+              {:error, reason}
+          end
         end
       end
     end
+  end
+
+  # The first words of the prompt, so an isolated session's branch is
+  # recognisable in `git branch` rather than being a random string.
+  defp title(prompt) do
+    prompt |> String.split(~r/\s+/, trim: true) |> Enum.take(5) |> Enum.join(" ")
   end
 
   @doc """
@@ -236,7 +253,8 @@ defmodule Khymeia.Runtime do
       workspace: get.(:workspace),
       prompt: get.(:prompt),
       model: blank_to_nil(get.(:model)),
-      permission_mode: blank_to_nil(get.(:permission_mode))
+      permission_mode: blank_to_nil(get.(:permission_mode)),
+      worktree: blank_to_nil(get.(:worktree))
     }
   end
 

@@ -38,6 +38,40 @@ defmodule KhymeiaWeb.SessionComponents do
     """
   end
 
+  attr :name, :string, required: true
+  attr :value, :string, default: nil
+  attr :worktrees, :list, default: []
+  attr :error, :string, default: nil
+  attr :hint, :string, default: nil
+  attr :unavailable, :string, default: nil, doc: "why a new worktree is not possible here"
+
+  @doc """
+  Where the work runs: the project folder, a fresh worktree, or one that
+  already exists. Offered wherever work is started, in the same words.
+  """
+  def worktree_field(assigns) do
+    ~H"""
+    <div class="k-field">
+      <label class="k-label" for={@name}>Isolation</label>
+      <select id={@name} name={@name} class="k-select">
+        <option value="" selected={@value in [nil, ""]}>Work in the project folder</option>
+        <option value="new" selected={@value == "new"} disabled={@unavailable != nil}>
+          New git worktree and branch
+        </option>
+        <option :for={w <- @worktrees} value={w.id} selected={w.id == @value}>
+          Existing: {w.branch}
+        </option>
+      </select>
+      <span :if={@error} class="k-error">{@error}</span>
+      <span :if={@unavailable} class="k-hint k-warn">No new worktree here: {@unavailable}</span>
+      <span :if={is_nil(@unavailable)} class="k-hint">
+        {@hint ||
+          "A worktree gives the agent its own directory and branch, so it cannot disturb what you are working on. Khymeia never merges it."}
+      </span>
+    </div>
+    """
+  end
+
   attr :entry, :map, required: true, doc: "a `KhymeiaWeb.WorkEntry`"
 
   @doc "One piece of work — a session or a workflow run — as a card."

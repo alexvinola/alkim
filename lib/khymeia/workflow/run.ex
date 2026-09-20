@@ -31,6 +31,7 @@ defmodule Khymeia.Workflow.Run do
     field :title, :string
     field :workspace, :string
     field :project_id, :binary_id
+    field :worktree_id, :binary_id
     field :task, :string
     field :constraints, :string
     field :status, Ecto.Enum, values: @statuses, default: :pending
@@ -55,7 +56,7 @@ defmodule Khymeia.Workflow.Run do
   def terminal?(status) when is_atom(status), do: status in @terminal
   def active?(run), do: not terminal?(run)
 
-  @fields ~w(id name title workspace project_id task constraints status waiting_reason waiting_detail
+  @fields ~w(id name title workspace project_id worktree_id task constraints status waiting_reason waiting_detail
              current_step iteration max_iterations definition roles advisor_calls error metadata
              started_at completed_at)a
 

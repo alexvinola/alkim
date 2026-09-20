@@ -93,6 +93,7 @@ defmodule Khymeia.Sessions do
       harness: String.to_existing_atom(record.harness),
       workspace: record.workspace,
       project_id: record.project_id,
+      worktree_id: record.worktree_id,
       prompt: record.prompt,
       model: record.model,
       permission_mode: record.permission_mode,

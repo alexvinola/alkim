@@ -8,6 +8,19 @@ defmodule KhymeiaWeb.SessionLiveTest do
 
   alias Khymeia.Runtime
 
+  test "the sessions view lists terminals alongside sessions", %{conn: conn} do
+    ws = workspace!()
+    {:ok, terminal} = Khymeia.Terminals.start(%{"harness" => "fake", "workspace" => ws})
+
+    {:ok, view, _html} = live(conn, ~p"/sessions")
+
+    eventually(fn -> has_element?(view, "#terminal-#{terminal.id}") end)
+    assert render(view) =~ "Terminal"
+
+    Khymeia.Terminals.stop(terminal.id)
+    eventually(fn -> has_element?(view, "#terminal-#{terminal.id}", "completed") end)
+  end
+
   test "the sessions view lists live sessions, updating in real time", %{conn: conn} do
     {:ok, view, html} = live(conn, ~p"/sessions")
 

@@ -259,7 +259,7 @@ defmodule Khymeia.Terminals.Server do
   defp update(state, attrs) do
     terminal = struct(state.terminal, Map.new(attrs))
     Terminals.save(terminal)
-    Terminals.broadcast(terminal.id, {:terminal_status, terminal})
+    Terminals.broadcast_status(terminal.id, {:terminal_status, terminal})
     %{state | terminal: terminal}
   end
 

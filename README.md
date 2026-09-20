@@ -45,7 +45,7 @@ Early and moving fast, but built to be trusted with real work:
 | Projects and shell (sidebar, per-project overview, repository tab) | working |
 | Embedded terminals (the harness's own TUI on a real pty) | working; verified end to end with the Claude Code TUI, including a model exchange |
 | Terminal output saved to disk | working; survives restarting the daemon |
-| Git worktree isolation (own directory and branch per piece of work) | working; verified on this repository |
+| Git worktree isolation (own directory and branch per piece of work) | working for terminals, sessions and workflow runs; verified on this repository |
 | Resuming a conversation from an embedded terminal | working; verified with Claude Code (exchange → `/exit` → reopen → history intact) |
 | Test suite | 141 tests, no agent CLI required ([CI](.github/workflows/ci.yml)) |
 | Packaging | OTP release works; Homebrew formula pending |
@@ -134,6 +134,16 @@ own directory and its own branch, off the current `HEAD`.
   untracked files.
 - *Open terminal here* runs a harness inside the worktree. The terminal still
   belongs to the project, even though the directory sits next to it.
+- The **New session** and **New workflow** forms offer the same choice — the
+  project folder, a fresh worktree, or one that already exists. A workflow
+  run defaults to a fresh one, because several agents in one folder is
+  exactly the case isolation is for: the auditor then sees what the
+  implementer changed and nothing else.
+- A fresh worktree's branch is named after the work (`khymeia/add-a-greeting-…`),
+  so it is recognisable in `git branch`.
+- Where isolation is not possible — the project is not a repository, or the
+  directory beside it falls outside the allowed roots — the form says so and
+  does not offer it, rather than failing on submit.
 
 **Khymeia never merges.** *Keep branch* removes the directory and leaves the
 branch for you to review, rebase or merge yourself. *Discard* removes both.
@@ -625,12 +635,11 @@ becoming a general-purpose development platform. In order:
    area. Finish the Homebrew distribution path and keep every integration
    verified against the real installed CLI.
 
-2. **Worktree isolation** — *landed for terminals* (see
-   [Worktrees](#worktrees)): own directory, own branch, base branch and
-   commit, changed files with insertions and deletions, commits created, and
-   explicit **keep** and **discard**. Khymeia never merges agent work
-   automatically. Still to come: headless sessions and workflow runs claiming
-   a worktree of their own by default.
+2. **Worktree isolation** — *landed* (see [Worktrees](#worktrees)): own
+   directory, own branch, base branch and commit, changed files with
+   insertions and deletions, commits created, and explicit **keep** and
+   **discard**, for terminals, sessions and workflow runs alike. Khymeia
+   never merges agent work automatically.
 
 3. **Embedded terminal as the primary way to work** — run the harness's own
    interactive interface inside Khymeia, in the session's worktree and with

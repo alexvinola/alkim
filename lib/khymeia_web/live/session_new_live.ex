@@ -12,7 +12,7 @@ defmodule KhymeiaWeb.SessionNewLive do
 
   alias KhymeiaWeb.WorkspacePicker
 
-  import KhymeiaWeb.SessionComponents, only: [mode_tabs: 1]
+  import KhymeiaWeb.SessionComponents, only: [mode_tabs: 1, worktree_field: 1]
 
   alias Khymeia.Runtime
   alias KhymeiaWeb.HarnessOptions
@@ -29,6 +29,7 @@ defmodule KhymeiaWeb.SessionNewLive do
       "model" => "",
       "custom_model" => "",
       "permission_mode" => "",
+      "worktree" => "",
       "prompt" => ""
     }
 
@@ -68,11 +69,20 @@ defmodule KhymeiaWeb.SessionNewLive do
     end
   end
 
+  # A choice that is no longer possible must not stay selected.
+  defp reconcile_worktree(params, unavailable) do
+    if unavailable && params["worktree"] == "new", do: %{params | "worktree" => ""}, else: params
+  end
+
   defp assign_params(socket, params) do
     option = HarnessOptions.find(socket.assigns.options, params["harness"])
     harness = option && option.harness
+    unavailable = unavailable(params["workspace"])
+    params = reconcile_worktree(params, unavailable)
 
     assign(socket,
+      worktrees: worktrees_for(params["workspace"]),
+      worktree_unavailable: unavailable,
       params: params,
       form: to_form(params, as: :session),
       option: option,
@@ -87,6 +97,22 @@ defmodule KhymeiaWeb.SessionNewLive do
 
   defp maybe_reset_harness_fields(_old, params),
     do: Map.merge(params, %{"model" => "", "custom_model" => "", "permission_mode" => ""})
+
+  defp unavailable(workspace) do
+    case Khymeia.Worktrees.offer(workspace) do
+      :ok -> nil
+      {:unavailable, reason} -> reason
+    end
+  end
+
+  # Only worktrees of the project the chosen workspace belongs to: offering
+  # another project's would silently move the work elsewhere.
+  defp worktrees_for(workspace) do
+    case workspace && Khymeia.Projects.for_workspace(workspace) do
+      %{id: id} -> Khymeia.Worktrees.active_for_project(id)
+      _ -> []
+    end
+  end
 
   # The project this form was opened from, else the last workspace used.
   defp default_workspace(project_id) do
@@ -200,6 +226,14 @@ defmodule KhymeiaWeb.SessionNewLive do
             Non-interactive runs cannot ask for approval; this decides what the agent may do on its own.
           </span>
         </div>
+
+        <.worktree_field
+          name="session[worktree]"
+          value={@params["worktree"]}
+          worktrees={@worktrees}
+          error={@errors[:worktree]}
+          unavailable={@worktree_unavailable}
+        />
 
         <div class="k-field">
           <label class="k-label" for="session_prompt">Prompt</label>

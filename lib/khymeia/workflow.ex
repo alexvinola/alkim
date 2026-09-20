@@ -46,8 +46,17 @@ defmodule Khymeia.Workflow do
     with {:ok, definition} <- definition(attrs),
          {:ok, workspace, task} <- workspace_and_task(attrs),
          {:ok, max_iterations} <- max_iterations(attrs, definition),
-         {:ok, roles, notes} <- assign_roles(attrs, definition, workspace, task) do
-      project = Khymeia.Projects.ensure_for_workspace(workspace)
+         {:ok, roles, notes} <- assign_roles(attrs, definition, workspace, task),
+         project = Khymeia.Projects.ensure_for_workspace(workspace),
+         {:ok, worktree} <- Khymeia.Worktrees.claim(attrs["worktree"], project, task) do
+      # A run with several agents in it benefits most from isolation: the
+      # auditor then sees exactly what the implementer changed, and nothing
+      # else that happened to be in the folder.
+      workspace = if worktree, do: worktree.path, else: workspace
+
+      project =
+        if worktree, do: Khymeia.Projects.get(worktree.project_id) || project, else: project
+
       Khymeia.Projects.touch(project)
 
       run = %Run{
@@ -56,6 +65,7 @@ defmodule Khymeia.Workflow do
         title: definition.title,
         workspace: workspace,
         project_id: project && project.id,
+        worktree_id: worktree && worktree.id,
         task: task,
         constraints: blank_to_nil(attrs["constraints"]),
         status: :pending,
