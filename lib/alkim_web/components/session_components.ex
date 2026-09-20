@@ -41,6 +41,9 @@ defmodule AlkimWeb.SessionComponents do
   attr :name, :string, required: true
   attr :value, :string, default: nil
   attr :worktrees, :list, default: []
+  attr :branch_name, :string, default: nil, doc: "form field holding the branch choice"
+  attr :branch, :string, default: nil
+  attr :branches, :list, default: []
   attr :error, :string, default: nil
   attr :hint, :string, default: nil
   attr :unavailable, :string, default: nil, doc: "why a new worktree is not possible here"
@@ -48,6 +51,11 @@ defmodule AlkimWeb.SessionComponents do
   @doc """
   Where the work runs: the project folder, a fresh worktree, or one that
   already exists. Offered wherever work is started, in the same words.
+
+  A fresh worktree asks a second question — *on which branch* — because the
+  two decisions are independent: a new branch cut from HEAD is the common
+  case, but continuing an existing branch in its own directory is the other
+  half of the same feature.
   """
   def worktree_field(assigns) do
     ~H"""
@@ -56,7 +64,7 @@ defmodule AlkimWeb.SessionComponents do
       <select id={@name} name={@name} class="a-select">
         <option value="" selected={@value in [nil, ""]}>Work in the project folder</option>
         <option value="new" selected={@value == "new"} disabled={@unavailable != nil}>
-          New git worktree and branch
+          New git worktree
         </option>
         <option :for={w <- @worktrees} value={w.id} selected={w.id == @value}>
           Existing: {w.branch}
@@ -68,6 +76,27 @@ defmodule AlkimWeb.SessionComponents do
         {@hint ||
           "A worktree gives the agent its own directory and branch, so it cannot disturb what you are working on. Alkim never merges it."}
       </span>
+
+      <div :if={@branch_name && @value == "new"} class="a-field" style="margin-top:.5rem">
+        <label class="a-label" for={@branch_name}>Branch</label>
+        <select id={@branch_name} name={@branch_name} class="a-select">
+          <option value="new" selected={@branch in [nil, "", "new"]}>
+            New branch, cut from HEAD
+          </option>
+          <option
+            :for={b <- @branches}
+            value={b.name}
+            selected={b.name == @branch}
+            disabled={b.checked_out}
+          >
+            {b.name}{if b.checked_out, do: " — in use"}
+          </option>
+        </select>
+        <span class="a-hint">
+          An existing branch keeps its own history: the worktree starts where that
+          branch already is, not where you are standing.
+        </span>
+      </div>
     </div>
     """
   end

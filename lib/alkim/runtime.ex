@@ -57,7 +57,9 @@ defmodule Alkim.Runtime do
       project = Alkim.Projects.ensure_for_workspace(params.workspace)
 
       with {:ok, worktree} <-
-             Alkim.Worktrees.claim(params.worktree, project, title(params.prompt)) do
+             Alkim.Worktrees.claim(params.worktree, project, title(params.prompt),
+               branch: params.worktree_branch
+             ) do
         # An isolated session runs in the worktree, not in the project folder.
         workspace = if worktree, do: worktree.path, else: params.workspace
 
@@ -255,7 +257,8 @@ defmodule Alkim.Runtime do
       prompt: get.(:prompt),
       model: blank_to_nil(get.(:model)),
       permission_mode: blank_to_nil(get.(:permission_mode)),
-      worktree: blank_to_nil(get.(:worktree))
+      worktree: blank_to_nil(get.(:worktree)),
+      worktree_branch: blank_to_nil(get.(:worktree_branch))
     }
   end
 

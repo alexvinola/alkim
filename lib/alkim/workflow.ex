@@ -48,7 +48,10 @@ defmodule Alkim.Workflow do
          {:ok, max_iterations} <- max_iterations(attrs, definition),
          {:ok, roles, notes} <- assign_roles(attrs, definition, workspace, task),
          project = Alkim.Projects.ensure_for_workspace(workspace),
-         {:ok, worktree} <- Alkim.Worktrees.claim(attrs["worktree"], project, task) do
+         {:ok, worktree} <-
+           Alkim.Worktrees.claim(attrs["worktree"], project, task,
+             branch: attrs["worktree_branch"]
+           ) do
       # A run with several agents in it benefits most from isolation: the
       # auditor then sees exactly what the implementer changed, and nothing
       # else that happened to be in the folder.

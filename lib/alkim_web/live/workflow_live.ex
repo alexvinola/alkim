@@ -1,12 +1,18 @@
 defmodule AlkimWeb.WorkflowLive do
   @moduledoc """
   A workflow run, laid out like a project: a header that never moves, then
-  tabs over what the run is made of — its timeline, its steps, the agents it
-  started, what it changed, and how its roles are mapped.
+  tabs over what the run is made of — its timeline, its steps, the terminals
+  of the agents it started, what it changed, and how its roles are mapped.
 
   What stays *above* the tabs is deliberate: status and a human checkpoint
   are the things a run needs you for, and they must never be hidden behind a
   tab you did not happen to open.
+
+  The Terminals tab is the run seen as what it really is: several CLIs in
+  one directory. Picking a role shows *that agent's own terminal* — the
+  harness's interface, not a rendering of it — and the implementer's, being
+  the one a human talks to, is where the exchanges with the advisor and the
+  auditor land, so they can be read where they happened.
 
   Workflow events only say *that* something changed; the view re-reads the
   persisted run, which is the source of truth. No polling.
@@ -14,17 +20,22 @@ defmodule AlkimWeb.WorkflowLive do
 
   use AlkimWeb, :live_view
 
+  on_mount AlkimWeb.TerminalPane
+
   import AlkimWeb.SessionComponents
 
-  alias Alkim.{Runtime, Terminals, Workflow, Worktrees}
-  alias Alkim.Runtime.Event
+  alias Alkim.{Terminals, Workflow, Worktrees}
   alias Alkim.Workflow.{Role, Run, Timeline}
+  alias AlkimWeb.TerminalPane
 
-  @tabs ~w(timeline steps agents changes roles)
+  @tabs ~w(timeline steps terminals changes roles)
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    if connected?(socket), do: Workflow.subscribe(id)
+    if connected?(socket) do
+      Workflow.subscribe(id)
+      Terminals.subscribe_all()
+    end
 
     case Workflow.get(id) do
       {:ok, run, steps} ->
@@ -34,7 +45,6 @@ defmodule AlkimWeb.WorkflowLive do
            reply: "",
            tab: "timeline",
            agent: nil,
-           agent_events: [],
            project: Alkim.Projects.get(run.project_id)
          )
          |> assign_run(run, steps)}
@@ -46,17 +56,23 @@ defmodule AlkimWeb.WorkflowLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    tab = if params["tab"] in @tabs, do: params["tab"], else: "timeline"
+    tab = tab(params["tab"])
 
-    # On the agents tab, show one agent's own output: the run seen through
-    # the eyes of whoever is doing the work, not merged with everyone else.
+    # On the terminals tab, show one agent: the run seen through the eyes of
+    # whoever is doing the work, not merged with everyone else.
     wanted =
-      if tab == "agents",
+      if tab == "terminals",
         do: params["a"] || socket.assigns.agent || default_agent(socket.assigns.agents),
         else: nil
 
     {:noreply, socket |> assign(tab: tab) |> watch_agent(wanted)}
   end
+
+  # "agents" was this tab's name before it showed the agents' actual
+  # terminals; links to it still exist.
+  defp tab("agents"), do: "terminals"
+  defp tab(tab) when tab in @tabs, do: tab
+  defp tab(_tab), do: "timeline"
 
   # The implementer is the one a human talks to, so it is what opens first.
   defp default_agent([]), do: nil
@@ -68,39 +84,47 @@ defmodule AlkimWeb.WorkflowLive do
 
   defp watch_agent(%{assigns: %{agent: same}} = socket, same) when not is_nil(same), do: socket
 
-  defp watch_agent(socket, nil) do
-    if socket.assigns.agent, do: Runtime.unsubscribe_session(socket.assigns.agent)
-    assign(socket, agent: nil, agent_events: [])
-  end
+  defp watch_agent(socket, nil), do: socket |> TerminalPane.detach() |> assign(agent: nil)
 
   defp watch_agent(socket, session_id) do
-    if socket.assigns.agent, do: Runtime.unsubscribe_session(socket.assigns.agent)
-    if connected?(socket), do: Runtime.subscribe_session(session_id)
-
-    case Runtime.get_session(session_id) do
-      {:ok, session, events} ->
-        assign(socket,
-          agent: session_id,
-          agent_session: session,
-          agent_events: events,
-          agent_harness: harness_name(session.harness)
-        )
-
-      :error ->
-        assign(socket, agent: nil, agent_events: [])
+    case Enum.find(socket.assigns.agents, &(&1.session_id == session_id)) do
+      nil -> socket |> TerminalPane.detach() |> assign(agent: nil)
+      _agent -> socket |> assign(agent: session_id) |> show_terminal_of(session_id)
     end
+  end
+
+  # Selecting a role shows its terminal if it has one — including an exited
+  # one, whose output was saved. Nothing is *started* here: opening a page
+  # must never spawn a CLI behind the user's back.
+  defp show_terminal_of(socket, session_id) do
+    case terminal_of(socket, session_id) do
+      nil -> TerminalPane.detach(socket)
+      terminal -> TerminalPane.attach(socket, terminal)
+    end
+  end
+
+  defp selected(assigns),
+    do: Enum.find(assigns.agents, &(&1.session_id == assigns.agent))
+
+  # A terminal belongs to the agent whose conversation it continues, which
+  # is exactly what `harness_ref` names.
+  defp terminal_of(socket, session_id) do
+    agent = Enum.find(socket.assigns.agents, &(&1.session_id == session_id))
+
+    agent && agent.harness_ref &&
+      Enum.find(socket.assigns.terminals, &(&1.harness_ref == agent.harness_ref))
   end
 
   @impl true
   def handle_info({:workflow_event, _event}, socket), do: {:noreply, reload(socket)}
 
-  # Only the agent being watched: a run has several, and a view shows one.
-  def handle_info({:session_event, %Event{session_id: id} = event}, socket)
-      when id == socket.assigns.agent do
-    {:noreply, assign(socket, agent_events: socket.assigns.agent_events ++ [event])}
+  # Only this run's terminals: every terminal in Alkim reports here.
+  def handle_info({:terminal_status, %{workflow_id: id}}, socket)
+      when id == socket.assigns.run.id do
+    {:noreply, load_terminals(socket)}
   end
 
-  def handle_info({:session_event, _event}, socket), do: {:noreply, socket}
+  def handle_info(_message, socket), do: {:noreply, socket}
 
   @impl true
   def handle_event("stop", _, socket), do: act(socket, Workflow.stop(socket.assigns.run.id))
@@ -110,9 +134,9 @@ defmodule AlkimWeb.WorkflowLive do
     do: act(socket, Workflow.complete(socket.assigns.run.id))
 
   @doc false
-  # Opens the harness's *own* interface on this agent's conversation. Never
-  # while the workflow is mid-turn on it: two clients on one conversation is
-  # how you corrupt it.
+  # Puts the harness's *own* interface on this agent's conversation, in this
+  # page. Never while the workflow is mid-turn on it: two clients on one
+  # conversation is how you corrupt it.
   def handle_event("open_agent_terminal", %{"id" => session_id}, socket) do
     agent = Enum.find(socket.assigns.agents, &(&1.session_id == session_id))
 
@@ -130,27 +154,7 @@ defmodule AlkimWeb.WorkflowLive do
          )}
 
       true ->
-        attrs = %{
-          "harness" => agent.harness,
-          "worktree" => socket.assigns.run.worktree_id,
-          "workspace" => socket.assigns.run.workspace,
-          "model" => agent.model,
-          "resume" => agent.harness_ref
-        }
-
-        case Terminals.start(attrs) do
-          {:ok, terminal} ->
-            {:noreply,
-             push_navigate(socket,
-               to: ~p"/projects/#{socket.assigns.run.project_id}/terminal?t=#{terminal.id}"
-             )}
-
-          {:error, {:invalid, errors}} ->
-            {:noreply, put_flash(socket, :error, Enum.map_join(errors, "; ", fn {_, m} -> m end))}
-
-          {:error, reason} ->
-            {:noreply, put_flash(socket, :error, "Could not open the CLI: #{inspect(reason)}")}
-        end
+        take_over(socket, agent)
     end
   end
 
@@ -162,6 +166,41 @@ defmodule AlkimWeb.WorkflowLive do
       :ok -> {:noreply, socket |> assign(reply: "") |> reload()}
       error -> act(socket, error)
     end
+  end
+
+  # An agent that already has a terminal gets its process back on it, same
+  # record and same saved output; one that has none gets a new terminal that
+  # resumes its conversation. Either way the user ends up typing, which is
+  # the only thing "take over" should ever mean.
+  defp take_over(socket, agent) do
+    result =
+      case terminal_of(socket, agent.session_id) do
+        nil -> Terminals.start(terminal_attrs(socket.assigns.run, agent))
+        terminal -> Terminals.reopen(terminal.id)
+      end
+
+    case result do
+      {:ok, terminal} ->
+        {:noreply, socket |> load_terminals() |> TerminalPane.attach(terminal)}
+
+      {:error, {:invalid, errors}} ->
+        {:noreply, put_flash(socket, :error, Enum.map_join(errors, "; ", fn {_, m} -> m end))}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Could not open the CLI: #{inspect(reason)}")}
+    end
+  end
+
+  defp terminal_attrs(run, agent) do
+    %{
+      "harness" => agent.harness,
+      "worktree" => run.worktree_id,
+      "workspace" => run.workspace,
+      "workflow" => run.id,
+      "role" => agent.role,
+      "model" => agent.model,
+      "resume" => agent.harness_ref
+    }
   end
 
   defp act(socket, :ok), do: {:noreply, reload(socket)}
@@ -184,7 +223,7 @@ defmodule AlkimWeb.WorkflowLive do
 
   # A run usually has no agent yet when its page opens; the first one to
   # start is the one to show.
-  defp follow_first_agent(%{assigns: %{tab: "agents", agent: nil}} = socket),
+  defp follow_first_agent(%{assigns: %{tab: "terminals", agent: nil}} = socket),
     do: watch_agent(socket, default_agent(socket.assigns.agents))
 
   defp follow_first_agent(socket), do: socket
@@ -216,7 +255,11 @@ defmodule AlkimWeb.WorkflowLive do
       sidebar: sidebar(steps),
       worktree: Worktrees.get(run.worktree_id)
     )
+    |> load_terminals()
   end
+
+  defp load_terminals(socket),
+    do: assign(socket, terminals: Terminals.list_for_workflow(socket.assigns.run.id))
 
   @doc false
   # The run seen as "who did the work" rather than "what happened". A role
@@ -274,7 +317,7 @@ defmodule AlkimWeb.WorkflowLive do
         kind: :session,
         title: agent.label,
         status: agent.status,
-        path: ~p"/workflows/#{agent.workflow_id}/agents?#{[a: agent.session_id]}"
+        path: ~p"/workflows/#{agent.workflow_id}/terminals?#{[a: agent.session_id]}"
       }
     end
   end
@@ -351,7 +394,7 @@ defmodule AlkimWeb.WorkflowLive do
               {tab, label} <- [
                 {"timeline", "Timeline"},
                 {"steps", "Steps"},
-                {"agents", "Agents"},
+                {"terminals", "Terminals"},
                 {"changes", "Changes"},
                 {"roles", "Roles"}
               ]
@@ -399,7 +442,7 @@ defmodule AlkimWeb.WorkflowLive do
         </div>
       </section>
 
-      <section :if={@tab == "agents"} class="a-section a-agents">
+      <section :if={@tab == "terminals"} class="a-section a-agents">
         <div :if={@agents == []} class="a-panel a-empty">
           No agent has started yet. Each one appears here, and in the list on the left.
         </div>
@@ -407,7 +450,7 @@ defmodule AlkimWeb.WorkflowLive do
         <div :if={@agents != []} class="a-term-tabs">
           <.link
             :for={agent <- @agents}
-            patch={~p"/workflows/#{@run.id}/agents?#{[a: agent.session_id]}"}
+            patch={~p"/workflows/#{@run.id}/terminals?#{[a: agent.session_id]}"}
             id={"agent-tab-#{agent.session_id}"}
             class={["a-term-tab", @agent == agent.session_id && "a-term-tab-on"]}
           >
@@ -417,47 +460,12 @@ defmodule AlkimWeb.WorkflowLive do
           </.link>
         </div>
 
-        <div :if={@agent} class="a-panel">
-          <div class="a-agent-head">
-            <span class="a-mono a-faint">{@agent_harness}</span>
-            <.status status={@agent_session.status} />
-            <span style="flex:1"></span>
-            <button
-              class="a-btn a-btn-sm"
-              phx-click="open_agent_terminal"
-              phx-value-id={@agent}
-              id={"open-cli-#{@agent}"}
-              title="Run the harness's own interface on this conversation"
-            >
-              Open in the CLI
-            </button>
-            <.link navigate={~p"/sessions/#{@agent}"} class="a-hint a-link">Open on its own →</.link>
-          </div>
-
-          <div id={"agent-output-#{@agent}"} class="a-activity" phx-hook="FollowTail">
-            <div
-              :if={@agent_events == [] and not Alkim.Session.terminal?(@agent_session.status)}
-              class="a-empty"
-            >
-              Waiting for output…
-            </div>
-            <div
-              :if={@agent_events == [] and Alkim.Session.terminal?(@agent_session.status)}
-              class="a-empty"
-            >
-              This agent has finished and its process is gone. Alkim keeps a session's
-              activity in memory while it runs, so there is nothing to replay here — the
-              <.link patch={~p"/workflows/#{@run.id}/timeline"} class="a-link">timeline</.link>
-              keeps what it said.
-            </div>
-            <.event
-              :for={event <- @agent_events}
-              id={"ae-#{@agent}-#{event.seq}"}
-              event={event}
-              harness_name={@agent_harness}
-            />
-          </div>
-        </div>
+        <.agent_pane
+          :if={selected(assigns)}
+          agent={selected(assigns)}
+          terminal={@terminal}
+          run={@run}
+        />
       </section>
 
       <section :if={@tab == "changes"} class="a-section">
@@ -503,6 +511,74 @@ defmodule AlkimWeb.WorkflowLive do
         </ul>
       </section>
     </Layouts.app>
+    """
+  end
+
+  attr :agent, :map, required: true
+  attr :terminal, :any, required: true
+  attr :run, Run, required: true
+
+  @doc false
+  # One agent, as its terminal. While the run drives it, the agent has no
+  # terminal at all — Alkim runs workflow agents headlessly, which is what
+  # lets it read their answers and relay them between roles. Taking over
+  # puts the CLI on the same conversation, so what the roles said to each
+  # other is there in the scrollback.
+  defp agent_pane(assigns) do
+    ~H"""
+    <div class="a-panel" id={"agent-pane-#{@agent.session_id}"}>
+      <div class="a-agent-head">
+        <span class="a-mono a-faint">{harness_name(@agent.harness)}</span>
+        <.status status={@agent.status} />
+        <span :if={@terminal} class="a-hint">
+          {if Alkim.Terminals.Terminal.live?(@terminal), do: "you have the keyboard", else: "exited"}
+        </span>
+        <span style="flex:1"></span>
+        <button
+          :if={is_nil(@terminal) or not Alkim.Terminals.Terminal.live?(@terminal)}
+          class="a-btn a-btn-sm"
+          phx-click="open_agent_terminal"
+          phx-value-id={@agent.session_id}
+          id={"open-cli-#{@agent.session_id}"}
+          phx-disable-with="Opening…"
+          title="Put the harness's own interface on this conversation"
+        >
+          Take over in the CLI
+        </button>
+        <.link navigate={~p"/sessions/#{@agent.session_id}"} class="a-hint a-link">
+          Open on its own →
+        </.link>
+      </div>
+
+      <div
+        :if={@terminal}
+        id={"terminal-#{@terminal.id}"}
+        class={["a-term-screen", not Alkim.Terminals.Terminal.live?(@terminal) && "a-term-dead"]}
+        phx-hook="EmbeddedTerminal"
+        phx-update="ignore"
+        data-terminal-id={@terminal.id}
+      >
+      </div>
+
+      <div :if={is_nil(@terminal)} class="a-empty" style="padding:1.5rem 1rem">
+        <p :if={@agent.busy?}>
+          The run has this agent mid-turn. Alkim drives workflow agents headlessly —
+          that is what lets it read a verdict and hand it to the next role — so there is
+          no terminal to watch until the turn ends. The
+          <.link patch={~p"/workflows/#{@run.id}/timeline"} class="a-link">timeline</.link>
+          follows it meanwhile.
+        </p>
+        <p :if={not @agent.busy? and @agent.harness_ref}>
+          Take over to put {harness_name(@agent.harness)} on this conversation. Its history
+          comes with it, so what this role was asked and what it answered — including the
+          advisor's replies relayed into it — is there to read and continue.
+        </p>
+        <p :if={not @agent.busy? and is_nil(@agent.harness_ref)}>
+          {harness_name(@agent.harness)} did not give this conversation a name Alkim can
+          reopen, so its CLI cannot be pointed back at it.
+        </p>
+      </div>
+    </div>
     """
   end
 

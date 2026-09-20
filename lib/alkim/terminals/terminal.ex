@@ -27,6 +27,8 @@ defmodule Alkim.Terminals.Terminal do
   schema "terminals" do
     field :project_id, :binary_id
     field :worktree_id, :binary_id
+    field :workflow_id, :binary_id
+    field :role, :string
     field :workspace, :string
     field :harness, :string
     field :provider_profile_id, :binary_id
@@ -44,8 +46,9 @@ defmodule Alkim.Terminals.Terminal do
   def statuses, do: @statuses
   def live?(%__MODULE__{status: status}), do: status != :exited
 
-  @fields ~w(id project_id worktree_id workspace harness provider_profile_id model
-             permission_mode harness_ref status exit_code started_at completed_at)a
+  @fields ~w(id project_id worktree_id workflow_id role workspace harness
+             provider_profile_id model permission_mode harness_ref status
+             exit_code started_at completed_at)a
 
   def changeset(terminal, attrs \\ %{}) do
     terminal

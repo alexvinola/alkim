@@ -104,8 +104,19 @@ defmodule Alkim.Worktrees do
 
   @doc "Branches that could host a new worktree, plus those already in use."
   @spec branches(map()) :: [%{name: String.t(), checked_out: boolean()}]
-  def branches(project) do
-    case Git.repository(project.path) do
+  def branches(%{path: path}), do: branches_at(path)
+
+  @doc """
+  The same, for a directory rather than a project.
+
+  A form asks this before anything has been started, so there is often no
+  project record yet — the repository is right there on disk all the same.
+  """
+  @spec branches_at(String.t() | nil) :: [%{name: String.t(), checked_out: boolean()}]
+  def branches_at(nil), do: []
+
+  def branches_at(path) do
+    case Git.repository(path) do
       :unavailable -> []
       repository -> Git.branches(repository)
     end
@@ -139,27 +150,35 @@ defmodule Alkim.Worktrees do
     * `"new"` — a fresh worktree, named after the work;
     * an id — that worktree, if it is still active.
 
+  `:branch` says what a fresh worktree checks out: `nil`/`"new"` cuts a new
+  branch, any other name continues that one.
+
   Returning `{:ok, nil}` means "no worktree", which is a valid answer and not
   an error: isolation is offered, never imposed.
   """
-  @spec claim(String.t() | nil, map() | nil, String.t() | nil) ::
+  @spec claim(String.t() | nil, map() | nil, String.t() | nil, keyword()) ::
           {:ok, Worktree.t() | nil} | {:error, error()}
-  def claim(choice, project, name \\ nil)
+  def claim(choice, project, name \\ nil, opts \\ [])
 
-  def claim(choice, _project, _name) when choice in [nil, ""], do: {:ok, nil}
+  def claim(choice, _project, _name, _opts) when choice in [nil, ""], do: {:ok, nil}
 
-  def claim("new", nil, _name),
+  def claim("new", nil, _name, _opts),
     do: {:error, {:invalid, %{worktree: "a worktree needs a project"}}}
 
-  def claim("new", project, name), do: create(project, name)
+  def claim("new", project, name, opts),
+    do: create(project, name, branch: branch_choice(opts[:branch]))
 
-  def claim(id, _project, _name) do
+  def claim(id, _project, _name, _opts) do
     case get(id) do
       %Worktree{status: :active} = worktree -> {:ok, worktree}
       %Worktree{} -> {:error, {:invalid, %{worktree: "that worktree has been released"}}}
       nil -> {:error, {:invalid, %{worktree: "unknown worktree"}}}
     end
   end
+
+  @doc false
+  def branch_choice(choice) when choice in [nil, "", "new"], do: :new
+  def branch_choice(branch) when is_binary(branch), do: {:existing, branch}
 
   @doc """
   Removes the directory and leaves the branch: the work stays in git, ready

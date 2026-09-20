@@ -35,6 +35,7 @@ defmodule AlkimWeb.WorkflowNewLive do
           do: "new",
           else: ""
         ),
+      "worktree_branch" => "new",
       "roles" => default_roles(preset)
     }
 
@@ -118,6 +119,7 @@ defmodule AlkimWeb.WorkflowNewLive do
       params: params,
       preset: preset,
       worktrees: worktrees_for(params["workspace"]),
+      branches: branches_for(params["workspace"]),
       worktree_unavailable: unavailable,
       form: to_form(params, as: :workflow)
     )
@@ -134,6 +136,10 @@ defmodule AlkimWeb.WorkflowNewLive do
       {:unavailable, reason} -> reason
     end
   end
+
+  # Branches of the repository the chosen workspace belongs to, so a new
+  # worktree can continue one instead of cutting its own.
+  defp branches_for(workspace), do: Alkim.Worktrees.branches_at(workspace)
 
   # Only worktrees of the project the chosen workspace belongs to.
   defp worktrees_for(workspace) do
@@ -200,6 +206,9 @@ defmodule AlkimWeb.WorkflowNewLive do
           name="workflow[worktree]"
           value={@params["worktree"]}
           worktrees={@worktrees}
+          branch_name="workflow[worktree_branch]"
+          branch={@params["worktree_branch"]}
+          branches={@branches}
           error={@errors[:worktree]}
           unavailable={@worktree_unavailable}
           hint="Runs put several agents in one place, so they get their own worktree by default: the auditor then sees exactly what the implementer changed. Alkim never merges it."

@@ -30,6 +30,7 @@ defmodule AlkimWeb.SessionNewLive do
       "custom_model" => "",
       "permission_mode" => "",
       "worktree" => "",
+      "worktree_branch" => "new",
       "prompt" => ""
     }
 
@@ -82,6 +83,7 @@ defmodule AlkimWeb.SessionNewLive do
 
     assign(socket,
       worktrees: worktrees_for(params["workspace"]),
+      branches: branches_for(params["workspace"]),
       worktree_unavailable: unavailable,
       params: params,
       form: to_form(params, as: :session),
@@ -113,6 +115,9 @@ defmodule AlkimWeb.SessionNewLive do
       _ -> []
     end
   end
+
+  # Branches a new worktree could continue instead of cutting its own.
+  defp branches_for(workspace), do: Alkim.Worktrees.branches_at(workspace)
 
   # The project this form was opened from, else the last workspace used.
   defp default_workspace(project_id) do
@@ -231,6 +236,9 @@ defmodule AlkimWeb.SessionNewLive do
           name="session[worktree]"
           value={@params["worktree"]}
           worktrees={@worktrees}
+          branch_name="session[worktree_branch]"
+          branch={@params["worktree_branch"]}
+          branches={@branches}
           error={@errors[:worktree]}
           unavailable={@worktree_unavailable}
         />

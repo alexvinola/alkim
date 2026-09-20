@@ -63,6 +63,8 @@ defmodule Alkim.Terminals do
         id: Ecto.UUID.generate(),
         project_id: project && project.id,
         worktree_id: worktree && worktree.id,
+        workflow_id: attrs.workflow,
+        role: attrs.role,
         workspace: workspace,
         harness: Atom.to_string(harness.id),
         provider_profile_id: profile && profile.id,
@@ -205,6 +207,17 @@ defmodule Alkim.Terminals do
     Terminal |> order_by(desc: :inserted_at) |> limit(^limit) |> Repo.all()
   end
 
+  @doc """
+  Terminals a workflow run has open, oldest first.
+
+  Order matters here in a way it does not elsewhere: these are the agents of
+  one run, and the order they were opened in is the order they entered the
+  conversation.
+  """
+  def list_for_workflow(workflow_id) do
+    Terminal |> where(workflow_id: ^workflow_id) |> order_by(asc: :inserted_at) |> Repo.all()
+  end
+
   @doc "Terminals of a project, live ones first."
   def list_for_project(project_id, limit \\ 20) do
     Terminal
@@ -301,7 +314,10 @@ defmodule Alkim.Terminals do
       model: blank_to_nil(get.(:model)),
       permission_mode: blank_to_nil(get.(:permission_mode)),
       resume: blank_to_nil(get.(:resume)),
-      worktree: blank_to_nil(get.(:worktree))
+      worktree: blank_to_nil(get.(:worktree)),
+      worktree_branch: blank_to_nil(get.(:worktree_branch)),
+      workflow: blank_to_nil(get.(:workflow)),
+      role: blank_to_nil(get.(:role))
     }
   end
 
@@ -315,9 +331,9 @@ defmodule Alkim.Terminals do
     end
   end
 
-  defp worktree(%{worktree: choice, workspace: workspace}) do
+  defp worktree(%{worktree: choice, workspace: workspace} = attrs) do
     project = choice == "new" && Alkim.Projects.ensure_for_workspace(workspace)
-    Alkim.Worktrees.claim(choice, project || nil)
+    Alkim.Worktrees.claim(choice, project || nil, nil, branch: attrs.worktree_branch)
   end
 
   defp harness(%{harness: choice}) do

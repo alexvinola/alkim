@@ -53,6 +53,32 @@ defmodule AlkimWeb.ProjectLiveTest do
     assert scrollback =~ "fake>"
   end
 
+  # A terminal is subscribed as soon as it is shown, but the client's xterm
+  # only exists once the browser has applied the patch. Sending bytes in
+  # between painted them, and then the replay painted them again — the
+  # harness banner appeared twice on screen while the log held it once.
+  test "output is not painted twice when a terminal opens", %{conn: conn, project: project} do
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}")
+
+    view |> form("#open-terminal", terminal: %{harness: "fake"}) |> render_submit()
+    [terminal] = Alkim.Terminals.list_for_project(project.id)
+
+    eventually(fn -> Alkim.Terminals.attach(terminal.id) |> elem(2) =~ "fake>" end)
+
+    # Nothing has been pushed: the client has not said it is listening.
+    refute_received {_ref, {:push_event, "terminal:write", _}}
+
+    render_hook(view, "terminal_attached", %{})
+
+    # And what it does get is the whole scrollback, once, on a clean screen.
+    assert_received {_ref, {:push_event, "terminal:write", %{data: data, reset: true}}}
+    painted = Base.decode64!(data)
+    assert painted =~ "fake>"
+    assert length(String.split(painted, "fake harness interactive")) == 2
+
+    Alkim.Terminals.delete(terminal.id)
+  end
+
   test "active work shows up in the project and in the sidebar", %{
     conn: conn,
     project: project,

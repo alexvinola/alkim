@@ -11,6 +11,8 @@ defmodule AlkimWeb.ProjectLive do
 
   use AlkimWeb, :live_view
 
+  on_mount AlkimWeb.TerminalPane
+
   import AlkimWeb.SessionComponents,
     only: [work_card: 1, work_row: 1, short_path: 1, datetime: 1]
 
@@ -209,46 +211,9 @@ defmodule AlkimWeb.ProjectLive do
   def handle_event("pick_terminal_harness", %{"terminal" => %{"harness" => harness}}, socket),
     do: {:noreply, assign(socket, terminal_harness: harness)}
 
-  # The browser attached: replay what it missed before it started listening.
-  def handle_event("terminal_attached", _params, %{assigns: %{terminal: nil}} = socket),
-    do: {:noreply, socket}
-
-  def handle_event("terminal_attached", _params, socket) do
-    case Terminals.attach(socket.assigns.terminal.id) do
-      {:ok, terminal, scrollback} ->
-        # Replay from a clean screen: live output may already have been
-        # painted between subscribing and the client attaching, and the
-        # scrollback contains it too.
-        socket = assign(socket, terminal: terminal)
-        {:noreply, write(socket, terminal.id, scrollback, reset: true)}
-
-      :error ->
-        {:noreply, socket}
-    end
-  end
-
-  def handle_event("terminal_keys", %{"data" => data}, socket) do
-    if socket.assigns.terminal, do: Terminals.send_keys(socket.assigns.terminal.id, data)
-    {:noreply, socket}
-  end
-
-  def handle_event("terminal_resize", %{"rows" => rows, "cols" => cols}, socket) do
-    if socket.assigns.terminal, do: Terminals.resize(socket.assigns.terminal.id, rows, cols)
-    {:noreply, socket}
-  end
-
   @impl true
-  def handle_info({:terminal_output, id, data}, socket),
-    do: {:noreply, write(socket, id, data)}
-
-  def handle_info({:terminal_status, terminal}, socket) do
-    socket =
-      if socket.assigns.terminal && socket.assigns.terminal.id == terminal.id,
-        do: assign(socket, terminal: terminal),
-        else: socket
-
-    {:noreply, socket |> load() |> load_terminals()}
-  end
+  def handle_info({:terminal_status, _terminal}, socket),
+    do: {:noreply, socket |> load() |> load_terminals()}
 
   def handle_info(:worktrees_changed, socket), do: {:noreply, load_worktrees(socket)}
 
@@ -347,33 +312,7 @@ defmodule AlkimWeb.ProjectLive do
   defp load_terminals(%{assigns: %{project: project}} = socket),
     do: assign(socket, terminals: Terminals.list_for_project(project.id, 8))
 
-  # One subscription at a time: a view only ever paints the terminal it shows.
-  defp attach(socket, terminal) do
-    current = socket.assigns.terminal
-    if current && current.id != terminal.id, do: Terminals.unsubscribe(current.id)
-
-    if connected?(socket) and (is_nil(current) or current.id != terminal.id) do
-      Terminals.subscribe(terminal.id)
-    end
-
-    assign(socket, terminal: terminal)
-  end
-
-  defp write(socket, id, data, opts \\ [])
-
-  defp write(socket, id, data, opts) when byte_size(data) > 0 do
-    push_event(socket, "terminal:write", %{
-      id: id,
-      data: Base.encode64(data),
-      reset: Keyword.get(opts, :reset, false)
-    })
-  end
-
-  defp write(socket, id, _data, opts) do
-    if Keyword.get(opts, :reset, false),
-      do: push_event(socket, "terminal:write", %{id: id, data: "", reset: true}),
-      else: socket
-  end
+  defdelegate attach(socket, terminal), to: AlkimWeb.TerminalPane
 
   defp describe(errors),
     do: Enum.map_join(errors, "; ", fn {_field, message} -> message end)
