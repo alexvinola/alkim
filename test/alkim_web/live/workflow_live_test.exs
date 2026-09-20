@@ -63,11 +63,28 @@ defmodule AlkimWeb.WorkflowLiveTest do
     await_workflow(run.id, "workflow.completed")
     eventually(fn -> has_element?(view, "#workflow-status", "completed") end)
 
+    # The timeline is the landing tab: what happened, in order.
     html = render(view)
     assert html =~ "Found 2 issue(s)"
     assert html =~ "Missing input validation"
-    assert has_element?(view, "#workflow-steps", "Re-audit")
     assert html =~ "Workflow completed."
+
+    # Steps, agents and changes are cuts of the same run behind their tabs.
+    steps = view |> element(~s(a[href$="/steps"])) |> render_click()
+    assert steps =~ "Re-audit"
+
+    agents = view |> element(~s(a[href$="/agents"])) |> render_click()
+    assert agents =~ "Implementer"
+    assert agents =~ "Auditor"
+
+    # One row per conversation, not per step — and that distinction shows the
+    # design: the implementer implemented and then fixed on the *same*
+    # session, while each audit round gets a fresh, independent one.
+    agents = AlkimWeb.WorkflowLive.agents(elem(Workflow.get(run.id), 2))
+
+    assert [implementer] = Enum.filter(agents, &(&1.role == "implementer"))
+    assert implementer.steps == 2
+    assert [%{steps: 1}, %{steps: 1}] = Enum.filter(agents, &(&1.role == "auditor"))
   end
 
   test "a human answers a clarification from the run page", %{conn: conn} do

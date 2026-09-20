@@ -1,7 +1,12 @@
 defmodule AlkimWeb.WorkflowLive do
   @moduledoc """
-  A workflow run: role assignments, the step tree (with nested advisor
-  consultations), human checkpoints and the unified timeline.
+  A workflow run, laid out like a project: a header that never moves, then
+  tabs over what the run is made of — its timeline, its steps, the agents it
+  started, what it changed, and how its roles are mapped.
+
+  What stays *above* the tabs is deliberate: status and a human checkpoint
+  are the things a run needs you for, and they must never be hidden behind a
+  tab you did not happen to open.
 
   Workflow events only say *that* something changed; the view re-reads the
   persisted run, which is the source of truth. No polling.
@@ -13,6 +18,9 @@ defmodule AlkimWeb.WorkflowLive do
 
   alias Alkim.Workflow
   alias Alkim.Workflow.{Role, Run, Timeline}
+  alias Alkim.Worktrees
+
+  @tabs ~w(timeline steps agents changes roles)
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -22,12 +30,18 @@ defmodule AlkimWeb.WorkflowLive do
       {:ok, run, steps} ->
         {:ok,
          socket
-         |> assign(reply: "", project: Alkim.Projects.get(run.project_id))
+         |> assign(reply: "", tab: "timeline", project: Alkim.Projects.get(run.project_id))
          |> assign_run(run, steps)}
 
       :error ->
         {:ok, socket |> put_flash(:error, "Workflow not found") |> push_navigate(to: ~p"/")}
     end
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    {:noreply,
+     assign(socket, tab: if(params["tab"] in @tabs, do: params["tab"], else: "timeline"))}
   end
 
   @impl true
@@ -90,8 +104,58 @@ defmodule AlkimWeb.WorkflowLive do
       children: children,
       pending: pending,
       timeline: Timeline.build(run, steps),
-      live: Workflow.alive?(run.id)
+      live: Workflow.alive?(run.id),
+      agents: agents(steps),
+      sidebar: sidebar(steps),
+      worktree: Worktrees.get(run.worktree_id)
     )
+  end
+
+  @doc false
+  # The run seen as "who did the work" rather than "what happened". A role
+  # keeps one conversation across several steps — the implementer's fix
+  # continues the session that implemented — so agents are grouped by
+  # session, not by step. The newest step stands for the agent's state.
+  def agents(steps) do
+    steps
+    |> Enum.filter(& &1.session_id)
+    |> Enum.group_by(& &1.session_id)
+    |> Enum.map(fn {session_id, for_session} ->
+      [latest | _] = Enum.sort_by(for_session, &{&1.started_at, &1.inserted_at}, :desc)
+
+      %{
+        session_id: session_id,
+        role: latest.role,
+        harness: latest.harness,
+        model: latest.model,
+        status: latest.status,
+        steps: length(for_session),
+        started_at: Enum.min_by(for_session, & &1.inserted_at).started_at,
+        completed_at: latest.completed_at,
+        label: agent_label(latest)
+      }
+    end)
+    |> Enum.sort_by(& &1.started_at, {:asc, DateTime})
+  end
+
+  defp agent_label(%{role: role}) when is_binary(role) do
+    Role.title(String.to_existing_atom(role))
+  rescue
+    ArgumentError -> role
+  end
+
+  defp agent_label(step), do: step_label(step)
+
+  defp sidebar(steps) do
+    for agent <- agents(steps) do
+      %{
+        id: agent.session_id,
+        kind: :session,
+        title: agent.label,
+        status: agent.status,
+        path: ~p"/sessions/#{agent.session_id}"
+      }
+    end
   end
 
   defp title(run),
@@ -100,23 +164,28 @@ defmodule AlkimWeb.WorkflowLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} nav={@nav} active={:sessions} project={@project}>
-      <div class="a-section-head">
+    <Layouts.app
+      flash={@flash}
+      nav={@nav}
+      active={:sessions}
+      project={@project}
+      sessions={@sidebar}
+      sessions_title="Agents"
+    >
+      <div class="a-page-head">
         <div style="min-width:0">
           <span class="a-h2">Workflow · {@run.title || @run.name}</span>
           <h1 class="a-h1 a-truncate">{title(@run)}</h1>
         </div>
-        <div style="display:flex;gap:.5rem;flex:none">
-          <button
-            :if={@live and Run.active?(@run)}
-            class="a-btn a-btn-danger"
-            phx-click="stop"
-            id="stop-workflow"
-            data-confirm="Stop this workflow and every agent it started?"
-          >
-            Stop
-          </button>
-        </div>
+        <button
+          :if={@live and Run.active?(@run)}
+          class="a-btn a-btn-danger"
+          phx-click="stop"
+          id="stop-workflow"
+          data-confirm="Stop this workflow and every agent it started?"
+        >
+          Stop
+        </button>
       </div>
 
       <section class="a-section">
@@ -129,10 +198,10 @@ defmodule AlkimWeb.WorkflowLive do
               <dt>Iteration</dt><dd>{@run.iteration} / {@run.max_iterations}</dd>
             </div>
             <div>
-              <dt>Workspace</dt><dd class="a-mono">{short_path(@run.workspace)}</dd>
-            </div>
-            <div>
-              <dt>Started</dt><dd>{datetime(@run.started_at)}</dd>
+              <dt>Isolation</dt>
+              <dd class="a-mono a-truncate">
+                {if @worktree, do: @worktree.branch, else: "project folder"}
+              </dd>
             </div>
             <div>
               <dt>Duration</dt>
@@ -154,30 +223,40 @@ defmodule AlkimWeb.WorkflowLive do
         </div>
       </section>
 
-      <section class="a-section">
-        <div class="a-section-head">
-          <h2 class="a-h2">Roles</h2>
-        </div>
-        <div class="a-panel a-rows" id="workflow-roles">
-          <div :for={{role, spec} <- sort_roles(@run.roles)} class="a-row a-row-role">
-            <span>{Role.title(String.to_existing_atom(role))}</span>
-            <span>
-              {harness_name(spec["harness"])}
-              <span :if={spec["provider"]} class="a-hint">· {spec["provider"]}</span>
-            </span>
-            <span class="a-mono a-muted a-truncate">{spec["model"] || "default model"}</span>
-            <span class={["a-hint", spec["enforcement"] == "none" && "a-warn"]}>{permission_note(spec)}</span>
+      <div class="a-tabs-row">
+        <nav class="a-tabs a-tabs-page" aria-label="Workflow">
+          <.link
+            :for={
+              {tab, label} <- [
+                {"timeline", "Timeline"},
+                {"steps", "Steps"},
+                {"agents", "Agents"},
+                {"changes", "Changes"},
+                {"roles", "Roles"}
+              ]
+            }
+            patch={~p"/workflows/#{@run.id}/#{tab}"}
+            aria-current={@tab == tab && "page"}
+          >
+            {label}
+          </.link>
+        </nav>
+      </div>
+
+      <section :if={@tab == "timeline"} class="a-section">
+        <div class="a-panel a-activity" id="workflow-timeline" phx-hook="FollowTail">
+          <div
+            :for={e <- @timeline}
+            id={"tl-#{e.id}"}
+            class={["a-ev a-msg", "a-who-#{e.who}", "a-tone-#{e.tone}"]}
+          >
+            <span class="a-ev-time">{time(e.at)}</span>
+            <div class="a-ev-body"><span class="a-who">{who(e.who)}</span>{e.text}</div>
           </div>
         </div>
-        <ul :if={(@run.metadata["limitations"] || []) != []} class="a-hint a-notes">
-          <li :for={note <- @run.metadata["limitations"]}>{note}</li>
-        </ul>
       </section>
 
-      <section class="a-section">
-        <div class="a-section-head">
-          <h2 class="a-h2">Steps</h2>
-        </div>
+      <section :if={@tab == "steps"} class="a-section">
         <div class="a-panel a-tree" id="workflow-steps">
           <div :for={step <- @top} class="a-tree-item" id={"step-#{step.id}"}>
             <div class="a-step-line"><.step_line step={step} /></div>
@@ -199,22 +278,99 @@ defmodule AlkimWeb.WorkflowLive do
         </div>
       </section>
 
-      <section class="a-section">
-        <div class="a-section-head">
-          <h2 class="a-h2">Timeline</h2>
+      <section :if={@tab == "agents"} class="a-section">
+        <div :if={@agents == []} class="a-panel a-empty">
+          No agent has started yet. Each one appears here, and in the list on the left.
         </div>
-        <div class="a-panel a-activity" id="workflow-timeline" phx-hook="FollowTail">
-          <div
-            :for={e <- @timeline}
-            id={"tl-#{e.id}"}
-            class={["a-ev a-msg", "a-who-#{e.who}", "a-tone-#{e.tone}"]}
+        <div class="a-panel a-rows">
+          <.link
+            :for={agent <- @agents}
+            navigate={~p"/sessions/#{agent.session_id}"}
+            id={"agent-#{agent.session_id}"}
+            class="a-row a-row-role"
           >
-            <span class="a-ev-time">{time(e.at)}</span>
-            <div class="a-ev-body"><span class="a-who">{who(e.who)}</span>{e.text}</div>
-          </div>
+            <span>
+              {agent.label}
+              <span :if={agent.steps > 1} class="a-tag">{agent.steps} steps</span>
+            </span>
+            <span>
+              {harness_name(agent.harness)}
+              <span :if={agent.model} class="a-mono a-muted">· {agent.model}</span>
+            </span>
+            <.status status={agent.status} />
+            <span class="a-mono a-muted" style="text-align:right">
+              <%= if agent.status in [:running, :waiting] do %>
+                <.elapsed id={"agent-elapsed-#{agent.session_id}"} since={agent.started_at} />
+              <% else %>
+                {format_duration(agent.started_at, agent.completed_at)}
+              <% end %>
+            </span>
+          </.link>
         </div>
       </section>
+
+      <section :if={@tab == "changes"} class="a-section">
+        <div :if={is_nil(@worktree)} class="a-panel a-empty">
+          This run works in the project folder, so what it changed cannot be told apart
+          from anything else happening there. Start a run in its own worktree to see that.
+        </div>
+
+        <div :if={@worktree} class="a-panel">
+          <dl class="a-meta">
+            <div>
+              <dt>Branch</dt><dd class="a-mono">{@worktree.branch}</dd>
+            </div>
+            <div>
+              <dt>From</dt><dd class="a-mono">{@worktree.base_branch || "detached"}</dd>
+            </div>
+            <div>
+              <dt>Directory</dt>
+              <dd class="a-mono a-truncate">{short_path(@worktree.path)}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <.work_summary :if={@worktree} work={Worktrees.work(@worktree)} />
+      </section>
+
+      <section :if={@tab == "roles"} class="a-section">
+        <div class="a-panel a-rows" id="workflow-roles">
+          <div :for={{role, spec} <- sort_roles(@run.roles)} class="a-row a-row-role">
+            <span>{Role.title(String.to_existing_atom(role))}</span>
+            <span>
+              {harness_name(spec["harness"])}
+              <span :if={spec["provider"]} class="a-hint">· {spec["provider"]}</span>
+            </span>
+            <span class="a-mono a-muted a-truncate">{spec["model"] || "default model"}</span>
+            <span class={["a-hint", spec["enforcement"] == "none" && "a-warn"]}>
+              {permission_note(spec)}
+            </span>
+          </div>
+        </div>
+        <ul :if={(@run.metadata["limitations"] || []) != []} class="a-hint a-notes">
+          <li :for={note <- @run.metadata["limitations"]}>{note}</li>
+        </ul>
+      </section>
     </Layouts.app>
+    """
+  end
+
+  attr :work, :any, required: true
+
+  defp work_summary(assigns) do
+    ~H"""
+    <div :if={@work == :unavailable} class="a-panel a-empty a-mt">
+      The worktree is gone, so git can no longer say what changed in it.
+    </div>
+    <div :if={is_map(@work)} class="a-panel a-mt" style="padding:.8rem 1rem">
+      <p class="a-hint">
+        {@work.files} file(s) · <span class="a-change-A">+{@work.insertions}</span>
+        <span class="a-change-D">−{@work.deletions}</span>
+        · {@work.commits} commit(s)<span :if={@work.untracked > 0}>
+          · {@work.untracked} untracked
+        </span>
+      </p>
+    </div>
     """
   end
 

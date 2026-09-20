@@ -28,7 +28,12 @@ defmodule AlkimWeb.Layouts do
   attr :active, :atom, default: nil, doc: ":projects | :sessions | :new | :providers"
   attr :nav, :map, required: true, doc: "sidebar data assigned by `AlkimWeb.Nav`"
   attr :project, :any, default: nil, doc: "the project being viewed, if any"
-  attr :sessions, :list, default: [], doc: "sidebar entries for the open project"
+  attr :sessions, :list, default: [], doc: "what is inside the thing being viewed"
+
+  attr :sessions_title, :string,
+    default: nil,
+    doc: "heading for that list (default: project name)"
+
   slot :inner_block, required: true
 
   def app(assigns) do
@@ -88,7 +93,7 @@ defmodule AlkimWeb.Layouts do
           </nav>
 
           <div :if={@project && @sessions != []} class="a-side-section">
-            <span class="a-h2">{@project.name}</span>
+            <span class="a-h2">{@sessions_title || @project.name}</span>
             <.link
               :for={entry <- @sessions}
               navigate={entry.path}

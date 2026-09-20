@@ -161,6 +161,28 @@ defmodule Alkim.WorktreesTest do
     Alkim.Workflow.stop(run.id)
   end
 
+  # Worktrees live beside the repository, so an agent running in one is
+  # outside every project directory. It must not register its own worktree
+  # as a project of its own.
+  test "work inside a worktree belongs to the worktree's project", %{project: project} do
+    {:ok, worktree} = Worktrees.create(project, "no new project")
+
+    assert Projects.for_workspace(worktree.path).id == project.id
+    assert Projects.for_workspace(Path.join(worktree.path, "lib")).id == project.id
+
+    {:ok, session} =
+      Alkim.Runtime.start_session(%{
+        "harness" => "fake",
+        "workspace" => worktree.path,
+        "prompt" => "work in the worktree"
+      })
+
+    assert session.project_id == project.id
+    assert length(Projects.list()) == 1
+
+    Alkim.Runtime.stop_session(session.id)
+  end
+
   test "offer/1 says whether isolation is possible before it is chosen", %{project: project} do
     assert :ok = Worktrees.offer(project.path)
     assert {:unavailable, reason} = Worktrees.offer(workspace!())

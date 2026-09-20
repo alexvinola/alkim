@@ -96,16 +96,37 @@ defmodule Alkim.Projects do
 
   def ensure_for_workspace(_), do: nil
 
-  @doc "The innermost existing project containing `path` (or exactly at it)."
+  @doc """
+  The project a path belongs to: the innermost one containing it, or — for a
+  path inside a worktree — the project that worktree was cut from.
+
+  The second case matters because worktrees live *beside* the repository, so
+  an agent running in one is outside every project directory. Without this
+  it would register its own worktree as a new project.
+  """
   @spec for_workspace(String.t()) :: Project.t() | nil
   def for_workspace(path) when is_binary(path) do
     Project
     |> Repo.all()
     |> Enum.filter(&contains?(&1, path))
     |> Enum.max_by(&String.length(&1.path), fn -> nil end)
+    |> case do
+      nil -> project_of_worktree(path)
+      project -> project
+    end
   end
 
   def for_workspace(_), do: nil
+
+  defp project_of_worktree(path) do
+    Alkim.Worktrees.Worktree
+    |> Repo.all()
+    |> Enum.find(&(path == &1.path or String.starts_with?(path, &1.path <> "/")))
+    |> case do
+      nil -> nil
+      worktree -> get(worktree.project_id)
+    end
+  end
 
   defp contains?(%Project{path: root}, path),
     do: path == root or String.starts_with?(path, root <> "/")
