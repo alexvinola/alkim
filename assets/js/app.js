@@ -94,9 +94,12 @@ const EmbeddedTerminal = {
 
     this.term.onData(data => this.pushEvent("terminal_keys", {data}))
 
-    this.handleEvent("terminal:write", ({id, data}) => {
+    this.handleEvent("terminal:write", ({id, data, reset}) => {
       if (id !== this.el.dataset.terminalId) return
-      this.term.write(Uint8Array.from(atob(data), c => c.charCodeAt(0)))
+      // A replay carries the whole scrollback, so start from a clean screen
+      // rather than appending it to what is already painted.
+      if (reset) this.term.reset()
+      if (data) this.term.write(Uint8Array.from(atob(data), c => c.charCodeAt(0)))
     })
 
     // The window drives the size, so refit whenever the pane changes.

@@ -8,10 +8,11 @@ defmodule KhymeiaWeb.WorkEntry do
   use Phoenix.VerifiedRoutes, endpoint: KhymeiaWeb.Endpoint, router: KhymeiaWeb.Router
 
   alias Khymeia.{Session, Workflow}
+  alias Khymeia.Terminals.Terminal
 
   @type t :: %{
           id: String.t(),
-          kind: :session | :workflow,
+          kind: :session | :workflow | :terminal,
           title: String.t(),
           status: atom(),
           active?: boolean(),
@@ -39,6 +40,29 @@ defmodule KhymeiaWeb.WorkEntry do
       path: ~p"/sessions/#{session.id}",
       started_at: Map.get(session, :started_at),
       completed_at: Map.get(session, :completed_at)
+    }
+  end
+
+  @doc """
+  A terminal. Its title is the harness, because the interesting thing about
+  an interactive session is which agent is on the other end — there is no
+  prompt to summarise.
+  """
+  @spec from_terminal(Terminal.t()) :: t()
+  def from_terminal(terminal) do
+    %{
+      id: terminal.id,
+      kind: :terminal,
+      title: harness_name(terminal.harness),
+      status: if(Terminal.live?(terminal), do: :running, else: :completed),
+      active?: Terminal.live?(terminal),
+      label: "Terminal",
+      tag: terminal.model,
+      detail: nil,
+      workspace: terminal.workspace,
+      path: ~p"/projects/#{terminal.project_id}/terminal?#{[t: terminal.id]}",
+      started_at: terminal.started_at || terminal.inserted_at,
+      completed_at: terminal.completed_at
     }
   end
 

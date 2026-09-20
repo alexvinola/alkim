@@ -23,7 +23,8 @@ config :khymeia,
   recover_sessions_on_boot: false,
   # Phoenix.ConnTest addresses requests to www.example.com.
   allowed_hosts: ["www.example.com"],
-  workspace_roots: [Path.expand("../tmp/test-workspaces", __DIR__)]
+  workspace_roots: [Path.expand("../tmp/test-workspaces", __DIR__)],
+  terminal_log_dir: Path.expand("../tmp/test-terminal-logs", __DIR__)
 
 config :khymeia, Khymeia.Harness.Fake, delay: "0.05"
 

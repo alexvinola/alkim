@@ -44,6 +44,7 @@ Early and moving fast, but built to be trusted with real work:
 | Cloud providers (Bedrock, Foundry, Vertex, Azure OpenAI) | implemented from the CLIs' official docs; configuration accepted by the real CLIs, **not yet run against live accounts** |
 | Projects and shell (sidebar, per-project overview, repository tab) | working |
 | Embedded terminals (the harness's own TUI on a real pty) | working; verified end to end with the Claude Code TUI, including a model exchange |
+| Terminal output saved to disk | working; survives restarting the daemon |
 | Resuming a conversation from an embedded terminal | **not working yet** — see [Terminals](#terminals) |
 | Test suite | 141 tests, no agent CLI required ([CI](.github/workflows/ci.yml)) |
 | Packaging | OTP release works; Homebrew formula pending |
@@ -107,6 +108,15 @@ conversation (both can), a finished turn leaves the session **waiting**:
 reply to continue the same conversation, *Mark done*, or *Stop* it at any
 time.
 
+### Projects
+
+A project is a folder you work in. Its **Overview** is the state of that
+folder — what is running, what ran recently — not a prompt box: work starts by
+opening a terminal, with the headless lanes (session, workflow) one click
+away. **Git** shows what the repository looks like right now. Sessions,
+workflows and terminals all belong to a project, so history stays grouped by
+place.
+
 ### Terminals
 
 *Project → Terminal* runs the harness's **own interactive interface** inside
@@ -120,11 +130,17 @@ Khymeia owns the process, not the interface:
 - the runtime spawns `priv/bin/khymeia-pty`, a small C helper that holds the
   pseudo-terminal (the BEAM cannot allocate or resize one) and relays it with
   Erlang's `{packet, 4}` framing;
-- closing the helper's stdin kills the harness, so nothing outlives Khymeia;
-- output is kept in a bounded scrollback, so closing and reopening the browser
-  loses nothing;
+- closing the helper's stdin kills the harness, so nothing outlives Khymeia —
+  verified down to `kill -9` on the whole daemon;
+- **output is written to disk as it happens**, so a terminal can be reopened
+  and read after Khymeia itself restarted, not just after the browser closed;
 - the browser's window size drives `TIOCSWINSZ`, so the TUI lays itself out
   for what you can actually see.
+
+**Saved output is the one place Khymeia keeps raw harness output**, and a
+terminal shows whatever appeared on screen. So the directory is `0700`, each
+log is `0600` and capped at 1 MB, and *Delete* removes a terminal together
+with everything it printed. Set `:terminal_log_dir` to move them elsewhere.
 
 **Continuing a conversation — what is and is not verified.** Claude Code
 accepts `--session-id <uuid>`, and the interactive CLI does take it: running

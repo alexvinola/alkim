@@ -46,11 +46,7 @@ defmodule KhymeiaWeb.SessionComponents do
     <.link navigate={@entry.path} id={"card-#{@entry.id}"} class="k-card">
       <div class="k-card-head">
         <.status status={@entry.status} />
-        <.icon
-          :if={@entry.kind == :workflow}
-          name="hero-square-3-stack-3d"
-          class="size-3.5 k-faint"
-        />
+        <.icon :if={kind_icon(@entry.kind)} name={kind_icon(@entry.kind)} class="size-3.5 k-faint" />
       </div>
       <p class="k-card-title">{@entry.title}</p>
       <div class="k-card-meta">
@@ -97,6 +93,10 @@ defmodule KhymeiaWeb.SessionComponents do
     </.link>
     """
   end
+
+  defp kind_icon(:workflow), do: "hero-square-3-stack-3d"
+  defp kind_icon(:terminal), do: "hero-command-line"
+  defp kind_icon(_), do: nil
 
   attr :id, :string, required: true
   attr :since, :any, required: true

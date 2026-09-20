@@ -12,11 +12,12 @@ defmodule Khymeia.Terminals do
 
     * the **conversation** — persisted by the harness itself. Khymeia stores
       `harness_ref` and reopens it with the CLI's own resume flag;
-    * the **scrollback** — a bounded buffer in the terminal's process, so
-      closing and reopening the browser loses nothing;
+    * the **output** — written to disk as it happens (see
+      `Khymeia.Terminals.Log`), so a terminal can be reopened and read after
+      Khymeia itself has restarted, not just after the browser closed;
     * the **process** — a child of the runtime, so it dies with Khymeia.
-      Recovery means starting a new terminal that resumes the conversation,
-      not keeping the old process alive.
+      An exited terminal can be read but not typed into; continuing means
+      starting a new one, which asks the harness to resume the conversation.
   """
 
   import Ecto.Query
@@ -24,7 +25,7 @@ defmodule Khymeia.Terminals do
   alias Khymeia.Harness.Discovery
   alias Khymeia.Providers
   alias Khymeia.Repo
-  alias Khymeia.Terminals.{Server, Terminal}
+  alias Khymeia.Terminals.{Log, Server, Terminal}
 
   @pubsub Khymeia.PubSub
 
@@ -113,10 +114,12 @@ defmodule Khymeia.Terminals do
     end
   end
 
+  # A terminal whose process is gone still has its output on disk, which is
+  # the whole point of saving it: closing Khymeia must not lose the session.
   defp from_record(id) do
     case get(id) do
       nil -> :error
-      terminal -> {:ok, terminal, ""}
+      terminal -> {:ok, terminal, Log.read(id)}
     end
   end
 
@@ -153,6 +156,33 @@ defmodule Khymeia.Terminals do
       require Logger
       Logger.error("could not persist terminal #{terminal.id}: #{inspect(error)}")
       {:error, error}
+  end
+
+  @doc """
+  Forgets a terminal: its record and everything it printed. The only way to
+  remove saved output, so it is offered wherever a terminal is listed.
+  """
+  @spec delete(String.t()) :: :ok | {:error, term()}
+  def delete(id) do
+    with :ok <- stop_if_alive(id) do
+      Log.delete(id)
+
+      case get(id) do
+        nil -> :ok
+        terminal -> with {:ok, _} <- Repo.delete(terminal), do: :ok
+      end
+    end
+  end
+
+  defp stop_if_alive(id) do
+    if alive?(id) do
+      stop(id)
+      # Give the harness the same grace the helper does before dropping state.
+      Process.sleep(200)
+      :ok
+    else
+      :ok
+    end
   end
 
   @doc """

@@ -526,3 +526,10 @@ a.k-row:hover { background: var(--k-sunken); }
 }
 .k-term-screen .xterm { height: 100%; }
 .k-term-dead { opacity: .65; }
+
+/* Project launcher: the bar that starts work, terminal first. */
+.k-launcher {
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; padding: .7rem .8rem;
+  background: var(--k-surface); border: 1px solid var(--k-border); border-radius: 10px;
+}
+.k-launcher-form { display: flex; align-items: center; gap: .5rem; }

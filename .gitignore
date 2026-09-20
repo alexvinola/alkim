@@ -41,3 +41,7 @@ npm-debug.log
 
 # Built from c_src/ by the :native compiler; never committed.
 /priv/bin/khymeia-pty
+
+# Whatever embedded terminals printed. Never committed: it is raw
+# harness output and can contain anything that appeared on screen.
+/terminal-logs/

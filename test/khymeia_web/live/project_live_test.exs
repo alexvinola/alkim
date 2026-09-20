@@ -23,26 +23,34 @@ defmodule KhymeiaWeb.ProjectLiveTest do
     assert html =~ ~s(id="nav-project-#{project.id}")
   end
 
-  test "the composer starts a session in the project's folder", %{conn: conn, project: project} do
-    {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}")
+  test "the overview opens a terminal in the project's folder", %{conn: conn, project: project} do
+    {:ok, view, html} = live(conn, ~p"/projects/#{project.id}")
 
-    assert {:error, {:live_redirect, %{to: "/sessions/" <> id}}} =
-             view
-             |> form("#composer", start: %{harness: "fake", prompt: "do the thing"})
-             |> render_submit()
+    # The overview starts work, it is not a chat: no prompt box.
+    refute html =~ ~s(id="composer")
 
-    assert {:ok, session, _events} = Khymeia.Runtime.get_session(id)
-    assert session.workspace == project.path
-    assert session.project_id == project.id
+    view |> form("#open-terminal", terminal: %{harness: "fake"}) |> render_submit()
+
+    assert [terminal] = Khymeia.Terminals.list_for_project(project.id)
+    assert terminal.workspace == project.path
+    assert Khymeia.Terminals.alive?(terminal.id)
+
+    eventually(fn -> has_element?(view, "#card-#{terminal.id}") end)
   end
 
-  test "an empty prompt is refused without starting anything", %{conn: conn, project: project} do
-    {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}")
+  test "a terminal keeps its output after its process is gone", %{conn: conn, project: project} do
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}/terminal")
 
-    html = view |> form("#composer", start: %{harness: "fake", prompt: "  "}) |> render_submit()
+    view |> form("#open-terminal-tab", terminal: %{harness: "fake"}) |> render_submit()
+    [terminal] = Khymeia.Terminals.list_for_project(project.id)
 
-    assert html =~ "write a prompt"
-    assert Khymeia.Runtime.list_live() == []
+    eventually(fn -> Khymeia.Terminals.attach(terminal.id) |> elem(2) =~ "fake>" end)
+    Khymeia.Terminals.stop(terminal.id)
+    eventually(fn -> not Khymeia.Terminals.alive?(terminal.id) end)
+
+    # Re-attaching reads the saved log, which is what survives a restart.
+    {:ok, _terminal, scrollback} = Khymeia.Terminals.attach(terminal.id)
+    assert scrollback =~ "fake>"
   end
 
   test "active work shows up in the project and in the sidebar", %{
@@ -63,6 +71,22 @@ defmodule KhymeiaWeb.ProjectLiveTest do
 
   # The test workspaces live inside this repository, so git has something to
   # say about them; a folder outside any repository renders the other branch.
+  test "deleting a terminal from the UI removes its saved output", %{
+    conn: conn,
+    project: project
+  } do
+    {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}/terminal")
+    view |> form("#open-terminal-tab", terminal: %{harness: "fake"}) |> render_submit()
+    [terminal] = Khymeia.Terminals.list_for_project(project.id)
+    path = Khymeia.Terminals.Log.path(terminal.id)
+    eventually(fn -> File.exists?(path) end)
+
+    view |> element("#delete-terminal") |> render_click()
+
+    assert Khymeia.Terminals.get(terminal.id) == nil
+    refute File.exists?(path)
+  end
+
   test "the git tab reports what git knows about the folder", %{conn: conn, project: project} do
     {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}/git")
 

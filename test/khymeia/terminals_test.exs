@@ -99,6 +99,42 @@ defmodule Khymeia.TerminalsTest do
     assert id == terminal.id
   end
 
+  test "output is saved to disk and survives the terminal's process" do
+    terminal = open!(workspace!())
+    await_output(terminal.id, "fake>")
+    Terminals.send_keys(terminal.id, "saved-line\n")
+    await_output(terminal.id, "echo: saved-line")
+
+    Terminals.stop(terminal.id)
+    eventually(fn -> not Terminals.alive?(terminal.id) end)
+
+    # Nothing is running now, so this can only come from the log on disk.
+    {:ok, _terminal, scrollback} = Terminals.attach(terminal.id)
+    assert scrollback =~ "echo: saved-line"
+    assert File.regular?(Khymeia.Terminals.Log.path(terminal.id))
+  end
+
+  test "saved output is readable only by its owner" do
+    terminal = open!(workspace!())
+    await_output(terminal.id, "fake>")
+
+    %{mode: mode} = File.stat!(Khymeia.Terminals.Log.path(terminal.id))
+    assert Bitwise.band(mode, 0o077) == 0
+  end
+
+  test "deleting a terminal forgets its record and everything it printed" do
+    workspace = workspace!()
+    terminal = open!(workspace)
+    await_output(terminal.id, "fake>")
+    path = Khymeia.Terminals.Log.path(terminal.id)
+
+    assert :ok = Terminals.delete(terminal.id)
+
+    assert Terminals.get(terminal.id) == nil
+    refute File.exists?(path)
+    refute Terminals.alive?(terminal.id)
+  end
+
   test "a workspace outside the allowed roots is refused" do
     assert {:error, {:invalid, %{workspace: _}}} =
              Terminals.start(%{"harness" => "fake", "workspace" => "/etc"})

@@ -19,6 +19,7 @@ defmodule Khymeia.Terminals.Server do
   use GenServer, restart: :temporary
 
   alias Khymeia.Terminals
+  alias Khymeia.Terminals.Log
 
   # Enough to redraw a large window and keep some history, small enough that
   # idle terminals cost nothing worth measuring.
@@ -33,6 +34,8 @@ defmodule Khymeia.Terminals.Server do
       :port,
       :pending,
       :flush_timer,
+      :log,
+      log_bytes: 0,
       scrollback: [],
       scrollback_bytes: 0,
       size: {24, 80}
@@ -64,8 +67,18 @@ defmodule Khymeia.Terminals.Server do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
-    state = %State{terminal: Keyword.fetch!(opts, :terminal), size: @default_size}
+    terminal = Keyword.fetch!(opts, :terminal)
+    log = if Keyword.get(opts, :save_output, true), do: open_log(terminal.id)
+
+    state = %State{terminal: terminal, size: @default_size, log: log}
     {:ok, state, {:continue, {:spawn, Keyword.fetch!(opts, :launch)}}}
+  end
+
+  defp open_log(id) do
+    case Log.open(id) do
+      {:ok, device} -> device
+      :error -> nil
+    end
   end
 
   @impl true
@@ -107,8 +120,8 @@ defmodule Khymeia.Terminals.Server do
 
   @impl true
   def handle_call(:snapshot, _from, state) do
-    scrollback = state.scrollback |> Enum.reverse() |> IO.iodata_to_binary()
-    {:reply, {state.terminal, scrollback}, state}
+    state = flush(state)
+    {:reply, {state.terminal, replayable(state)}, state}
   end
 
   def handle_call(:stop, _from, %State{port: port} = state) when is_port(port) do
@@ -117,6 +130,18 @@ defmodule Khymeia.Terminals.Server do
   end
 
   def handle_call(:stop, _from, state), do: {:reply, :ok, state}
+
+  # Prefer what is on disk: it holds more history than the in-memory buffer,
+  # and it is what a client would get after a restart anyway.
+  defp replayable(%State{log: nil} = state),
+    do: state.scrollback |> Enum.reverse() |> IO.iodata_to_binary()
+
+  defp replayable(state) do
+    case Log.read(state.terminal.id) do
+      "" -> state.scrollback |> Enum.reverse() |> IO.iodata_to_binary()
+      saved -> saved
+    end
+  end
 
   @impl true
   def handle_info({port, {:data, <<?o, chunk::binary>>}}, %State{port: port} = state) do
@@ -146,7 +171,8 @@ defmodule Khymeia.Terminals.Server do
   def terminate(_reason, state) do
     # Closing the port makes the helper see EOF and take the harness with it.
     if is_port(state.port), do: Port.close(state.port)
-    flush(state)
+    state = flush(state)
+    Log.close(state.log)
     :ok
   end
 
@@ -182,7 +208,22 @@ defmodule Khymeia.Terminals.Server do
     Terminals.broadcast(state.terminal.id, {:terminal_output, state.terminal.id, data})
 
     if state.flush_timer, do: Process.cancel_timer(state.flush_timer)
-    %{state | pending: nil, flush_timer: nil}
+    state |> save(data) |> Map.merge(%{pending: nil, flush_timer: nil})
+  end
+
+  defp save(%State{log: nil} = state, _data), do: state
+
+  defp save(state, data) do
+    Log.write(state.log, data)
+    written = state.log_bytes + byte_size(data)
+
+    if written > Log.max_bytes() do
+      scrollback = state.scrollback |> Enum.reverse() |> IO.iodata_to_binary()
+      log = Log.rewrite(state.terminal.id, state.log, scrollback)
+      %{state | log: log, log_bytes: byte_size(scrollback)}
+    else
+      %{state | log_bytes: written}
+    end
   end
 
   # Whole chunks are dropped rather than split: cutting an escape sequence in
