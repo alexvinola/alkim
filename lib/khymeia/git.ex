@@ -129,7 +129,11 @@ defmodule Khymeia.Git do
     end
   end
 
-  defp run(git, workspace, args), do: Executable.run(git, ["-C", workspace | args])
+  # stderr is merged and discarded: several of these questions have a
+  # perfectly ordinary "no" answer (no upstream, no commits yet) that git
+  # reports on stderr, and it is not the operator's problem.
+  defp run(git, workspace, args),
+    do: Executable.run(git, ["-C", workspace | args], stderr: :merge)
 
   defp one_line({:ok, out}), do: String.trim(out)
   defp one_line(:error), do: nil
@@ -138,6 +142,185 @@ defmodule Khymeia.Git do
     case Integer.parse(value) do
       {n, _} -> n
       :error -> nil
+    end
+  end
+
+  ## Worktrees
+  #
+  # A worktree is how two agents work on one repository without fighting over
+  # the same files. Khymeia creates them and can remove them; it never merges
+  # anything, because deciding what reaches a branch is the developer's job.
+
+  @worktree_timeout 60_000
+
+  @doc "The repository a path belongs to, or `:unavailable` outside one."
+  @spec repository(String.t()) :: String.t() | :unavailable
+  def repository(path) do
+    case git_cmd(path, ["rev-parse", "--show-toplevel"]) do
+      {:ok, root} -> String.trim(root)
+      _ -> :unavailable
+    end
+  end
+
+  @doc "The commit `HEAD` points at, or `nil`."
+  def head(path) do
+    case git_cmd(path, ["rev-parse", "HEAD"]) do
+      {:ok, sha} -> String.trim(sha)
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Adds a worktree at `path` on a new `branch`, starting from `base`.
+
+  Fails rather than improvising if the branch or the directory already
+  exists: silently reusing either would put an agent somewhere the caller
+  did not mean.
+  """
+  @spec add_worktree(String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, %{path: String.t(), branch: String.t(), base_commit: String.t()}}
+          | {:error, String.t()}
+  def add_worktree(repository, path, branch, base) do
+    with {:ok, _} <-
+           git_cmd(repository, ["worktree", "add", "-b", branch, path, base],
+             timeout: @worktree_timeout
+           ) do
+      {:ok, %{path: path, branch: branch, base_commit: head(path)}}
+    end
+  end
+
+  @doc """
+  Removes a worktree directory. The branch survives: removing a worktree is
+  about the checkout, not about the work.
+  """
+  @spec remove_worktree(String.t(), String.t(), keyword()) :: :ok | {:error, String.t()}
+  def remove_worktree(repository, path, opts \\ []) do
+    args = ["worktree", "remove"] ++ if(opts[:force], do: ["--force"], else: []) ++ [path]
+
+    case git_cmd(repository, args, timeout: @worktree_timeout) do
+      {:ok, _} -> :ok
+      error -> error
+    end
+  end
+
+  @doc "Deletes a branch. `force: true` deletes it even if it was never merged."
+  @spec delete_branch(String.t(), String.t(), keyword()) :: :ok | {:error, String.t()}
+  def delete_branch(repository, branch, opts \\ []) do
+    flag = if opts[:force], do: "-D", else: "-d"
+
+    case git_cmd(repository, ["branch", flag, branch]) do
+      {:ok, _} -> :ok
+      error -> error
+    end
+  end
+
+  @doc "Worktrees git knows about, as `%{path:, branch:, head:}`."
+  @spec worktrees(String.t()) :: [map()]
+  def worktrees(repository) do
+    case git_cmd(repository, ["worktree", "list", "--porcelain"]) do
+      {:ok, out} -> parse_worktrees(out)
+      _ -> []
+    end
+  end
+
+  defp parse_worktrees(out) do
+    out
+    |> String.split("\n\n", trim: true)
+    |> Enum.map(fn block ->
+      Enum.reduce(String.split(block, "\n", trim: true), %{}, fn
+        "worktree " <> path, acc -> Map.put(acc, :path, path)
+        "HEAD " <> sha, acc -> Map.put(acc, :head, sha)
+        "branch refs/heads/" <> branch, acc -> Map.put(acc, :branch, branch)
+        _, acc -> acc
+      end)
+    end)
+    |> Enum.filter(&Map.has_key?(&1, :path))
+  end
+
+  @typedoc "What an agent did in a worktree, compared with where it started."
+  @type work :: %{
+          files: non_neg_integer(),
+          insertions: non_neg_integer(),
+          deletions: non_neg_integer(),
+          untracked: non_neg_integer(),
+          commits: non_neg_integer()
+        }
+
+  @doc """
+  How far a worktree has moved from `base`: tracked changes (committed or
+  not), untracked files, and commits made. `:unavailable` when git cannot say.
+  """
+  @spec work_done(String.t(), String.t()) :: work() | :unavailable
+  def work_done(path, base) do
+    case git_cmd(path, ["diff", "--numstat", base]) do
+      {:ok, out} ->
+        {files, insertions, deletions} = sum_numstat(out)
+
+        %{
+          files: files,
+          insertions: insertions,
+          deletions: deletions,
+          untracked: count_untracked(path),
+          commits: count_commits(path, base)
+        }
+
+      _ ->
+        :unavailable
+    end
+  end
+
+  defp sum_numstat(out) do
+    out
+    |> String.split("\n", trim: true)
+    |> Enum.reduce({0, 0, 0}, fn line, {files, added, removed} ->
+      case String.split(line, "\t", parts: 3) do
+        # A binary file reports "-" instead of a count.
+        [a, d, _path] -> {files + 1, added + to_int(a), removed + to_int(d)}
+        _ -> {files, added, removed}
+      end
+    end)
+  end
+
+  defp to_int(value) do
+    case Integer.parse(value) do
+      {n, _} -> n
+      :error -> 0
+    end
+  end
+
+  defp count_untracked(path) do
+    case git_cmd(path, ["ls-files", "--others", "--exclude-standard"]) do
+      {:ok, out} -> out |> String.split("\n", trim: true) |> length()
+      _ -> 0
+    end
+  end
+
+  defp count_commits(path, base) do
+    case git_cmd(path, ["rev-list", "--count", base <> "..HEAD"]) do
+      {:ok, out} -> out |> String.trim() |> to_int()
+      _ -> 0
+    end
+  end
+
+  # Unlike the read-only helpers above, these report *why* they failed: the
+  # user is asking for an action and deserves git's own explanation.
+  defp git_cmd(path, args, opts \\ []) do
+    case git() do
+      {:ok, git} ->
+        task =
+          Task.async(fn ->
+            System.cmd(git, ["-C", path | args], stderr_to_stdout: true)
+          end)
+
+        case Task.yield(task, Keyword.get(opts, :timeout, 10_000)) ||
+               Task.shutdown(task, :brutal_kill) do
+          {:ok, {out, 0}} -> {:ok, out}
+          {:ok, {out, _}} -> {:error, String.trim(out)}
+          _ -> {:error, "git did not answer in time"}
+        end
+
+      :unavailable ->
+        {:error, "git is not installed"}
     end
   end
 

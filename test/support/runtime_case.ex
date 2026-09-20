@@ -35,6 +35,25 @@ defmodule Khymeia.RuntimeCase do
     dir
   end
 
+  @doc """
+  A workspace that is a git repository with one commit, for anything that
+  needs real branches or worktrees.
+  """
+  def git_workspace! do
+    dir = workspace!()
+    git = System.find_executable("git")
+
+    run = fn args -> System.cmd(git, ["-C", dir | args], stderr_to_stdout: true) end
+    {_, 0} = run.(["init", "-q", "-b", "main", "."])
+    File.write!(Path.join(dir, "README.md"), "base\n")
+    {_, 0} = run.(["add", "."])
+
+    {_, 0} =
+      run.(["-c", "user.email=test@khymeia", "-c", "user.name=Test", "commit", "-qm", "base"])
+
+    dir
+  end
+
   @doc "Starts a fake-harness session and subscribes the test to its events."
   def start_fake!(workspace, scenario, opts \\ []) do
     attrs = %{harness: "fake", workspace: workspace, prompt: "test prompt", model: scenario}

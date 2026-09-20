@@ -116,6 +116,57 @@ defmodule KhymeiaWeb.ProjectLiveTest do
     refute render(view) =~ "Reading the repository…"
   end
 
+  describe "worktrees" do
+    setup do
+      path = Khymeia.RuntimeCase.git_workspace!()
+      {:ok, project} = Projects.create(%{"path" => path})
+      {:ok, repo_project: project}
+    end
+
+    test "creating one from the overview isolates it on its own branch", %{
+      conn: conn,
+      repo_project: project
+    } do
+      {:ok, view, html} = live(conn, ~p"/projects/#{project.id}")
+      assert html =~ "Khymeia never merges one"
+
+      view |> form("#create-worktree", worktree: %{name: "try something"}) |> render_submit()
+
+      assert [worktree] = Khymeia.Worktrees.list_for_project(project.id)
+      assert File.dir?(worktree.path)
+      assert render(view) =~ worktree.branch
+    end
+
+    test "keeping leaves the branch, discarding does not", %{conn: conn, repo_project: project} do
+      {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}")
+      view |> form("#create-worktree", worktree: %{name: "keep"}) |> render_submit()
+      view |> form("#create-worktree", worktree: %{name: "drop"}) |> render_submit()
+
+      [drop, keep] = Khymeia.Worktrees.list_for_project(project.id) |> Enum.sort_by(& &1.branch)
+
+      view |> element("#wt-keep-#{keep.id}") |> render_click()
+      view |> element("#wt-discard-#{drop.id}") |> render_click()
+
+      assert Khymeia.Worktrees.get(keep.id).status == :kept
+      assert Khymeia.Worktrees.get(drop.id).status == :discarded
+      refute File.exists?(keep.path)
+      refute File.exists?(drop.path)
+    end
+
+    test "a terminal can be opened inside a worktree", %{conn: conn, repo_project: project} do
+      {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}")
+      view |> form("#create-worktree", worktree: %{name: "work here"}) |> render_submit()
+      [worktree] = Khymeia.Worktrees.list_for_project(project.id)
+
+      view |> element("#wt-terminal-#{worktree.id}") |> render_click()
+
+      assert [terminal] = Khymeia.Terminals.list_for_project(project.id)
+      assert terminal.workspace == worktree.path
+      assert terminal.worktree_id == worktree.id
+      eventually(fn -> Khymeia.Terminals.alive?(terminal.id) end)
+    end
+  end
+
   test "renaming keeps the folder and removing keeps history", %{conn: conn, project: project} do
     {:ok, view, _html} = live(conn, ~p"/projects/#{project.id}/settings")
 

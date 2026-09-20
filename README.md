@@ -45,6 +45,7 @@ Early and moving fast, but built to be trusted with real work:
 | Projects and shell (sidebar, per-project overview, repository tab) | working |
 | Embedded terminals (the harness's own TUI on a real pty) | working; verified end to end with the Claude Code TUI, including a model exchange |
 | Terminal output saved to disk | working; survives restarting the daemon |
+| Git worktree isolation (own directory and branch per piece of work) | working; verified on this repository |
 | Resuming a conversation from an embedded terminal | working; verified with Claude Code (exchange → `/exit` → reopen → history intact) |
 | Test suite | 141 tests, no agent CLI required ([CI](.github/workflows/ci.yml)) |
 | Packaging | OTP release works; Homebrew formula pending |
@@ -116,6 +117,28 @@ opening a terminal, with the headless lanes (session, workflow) one click
 away. **Git** shows what the repository looks like right now. Sessions,
 workflows and terminals all belong to a project, so history stays grouped by
 place.
+
+### Worktrees
+
+Two agents in one repository is the sharpest edge Khymeia has: they share a
+working tree, overwrite each other's edits, and an auditor cannot tell whose
+change is whose. *Project → Overview → New worktree* gives a piece of work its
+own directory and its own branch, off the current `HEAD`.
+
+- The directory is created **beside** the repository
+  (`<repo>-khymeia-<slug>`), because inside it every `git status` in the
+  project would report it as untracked files. It has to be inside the allowed
+  workspace roots like any other workspace, and Khymeia says so if it is not.
+- Each worktree shows what the agent actually did there, read from git: files
+  touched, insertions and deletions against the base commit, commits made,
+  untracked files.
+- *Open terminal here* runs a harness inside the worktree. The terminal still
+  belongs to the project, even though the directory sits next to it.
+
+**Khymeia never merges.** *Keep branch* removes the directory and leaves the
+branch for you to review, rebase or merge yourself. *Discard* removes both.
+Nothing here writes to your main branch — a tool that quietly integrates agent
+work is a tool you cannot trust with a repository.
 
 ### Terminals
 
@@ -602,13 +625,12 @@ becoming a general-purpose development platform. In order:
    area. Finish the Homebrew distribution path and keep every integration
    verified against the real installed CLI.
 
-2. **Worktree isolation** — every session or workflow gets its own git
-   worktree and branch, so concurrent agents can work on the same repository
-   without sharing a working tree or overwriting each other. Each isolated
-   workspace exposes its base branch and commit, its session branch, changed
-   files, additions and deletions, the commits the agent created, and explicit
-   **keep** and **discard** actions. Khymeia never merges agent work
-   automatically.
+2. **Worktree isolation** — *landed for terminals* (see
+   [Worktrees](#worktrees)): own directory, own branch, base branch and
+   commit, changed files with insertions and deletions, commits created, and
+   explicit **keep** and **discard**. Khymeia never merges agent work
+   automatically. Still to come: headless sessions and workflow runs claiming
+   a worktree of their own by default.
 
 3. **Embedded terminal as the primary way to work** — run the harness's own
    interactive interface inside Khymeia, in the session's worktree and with

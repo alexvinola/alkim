@@ -536,3 +536,10 @@ a.k-row:hover { background: var(--k-sunken); }
   background: var(--k-surface); border: 1px solid var(--k-border); border-radius: 10px;
 }
 .k-launcher-form { display: flex; align-items: center; gap: .5rem; }
+
+/* Worktrees */
+.k-worktree { display: grid; gap: .35rem; padding: .8rem 1rem; }
+.k-worktree + .k-worktree { margin-top: .5rem; }
+.k-worktree-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.k-worktree-actions { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .3rem; }
+.k-input-inline { width: auto; min-width: 12rem; height: 1.9rem; font-size: 12.5px; }

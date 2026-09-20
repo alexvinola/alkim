@@ -43,18 +43,26 @@ defmodule Khymeia.Terminals do
   def start(attrs) do
     attrs = normalize(attrs)
 
-    with {:ok, workspace} <- workspace(attrs),
+    with {:ok, worktree} <- worktree(attrs),
+         {:ok, workspace} <- workspace(attrs, worktree),
          {:ok, harness, profile} <- harness(attrs),
          :ok <- supports_interactive(harness),
          # Resolve the credential before recording anything, so a broken
          # provider profile does not leave a terminal that never started.
          {:ok, _provider} <- resolve(profile) do
-      project = Khymeia.Projects.ensure_for_workspace(workspace)
+      # A worktree lives beside its repository, so its path does not sit
+      # inside the project. The terminal belongs to the project all the same.
+      project =
+        if worktree,
+          do: Khymeia.Projects.get(worktree.project_id),
+          else: Khymeia.Projects.ensure_for_workspace(workspace)
+
       Khymeia.Projects.touch(project)
 
       terminal = %Terminal{
         id: Ecto.UUID.generate(),
         project_id: project && project.id,
+        worktree_id: worktree && worktree.id,
         workspace: workspace,
         harness: Atom.to_string(harness.id),
         provider_profile_id: profile && profile.id,
@@ -274,14 +282,28 @@ defmodule Khymeia.Terminals do
       workspace: get.(:workspace),
       model: blank_to_nil(get.(:model)),
       permission_mode: blank_to_nil(get.(:permission_mode)),
-      resume: blank_to_nil(get.(:resume))
+      resume: blank_to_nil(get.(:resume)),
+      worktree: blank_to_nil(get.(:worktree))
     }
   end
 
-  defp workspace(%{workspace: path}) do
+  # A worktree decides the directory; otherwise the caller does.
+  defp workspace(_attrs, %{path: path}), do: {:ok, path}
+
+  defp workspace(%{workspace: path}, nil) do
     case Khymeia.Workspace.validate(path) do
       {:ok, workspace} -> {:ok, workspace}
       {:error, reason} -> invalid(:workspace, Khymeia.Workspace.error_message(reason))
+    end
+  end
+
+  defp worktree(%{worktree: nil}), do: {:ok, nil}
+
+  defp worktree(%{worktree: id}) do
+    case Khymeia.Worktrees.get(id) do
+      %{status: :active} = worktree -> {:ok, worktree}
+      %{} -> invalid(:worktree, "that worktree has been released")
+      nil -> invalid(:worktree, "unknown worktree")
     end
   end
 

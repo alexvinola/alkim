@@ -14,7 +14,7 @@ defmodule KhymeiaWeb.ProjectLive do
   import KhymeiaWeb.SessionComponents,
     only: [work_card: 1, work_row: 1, short_path: 1, datetime: 1]
 
-  alias Khymeia.{Git, Projects, Runtime, Terminals, Workflow}
+  alias Khymeia.{Git, Projects, Runtime, Terminals, Workflow, Worktrees}
   alias KhymeiaWeb.{HarnessOptions, WorkEntry}
 
   @tabs ~w(overview terminal git settings)
@@ -28,12 +28,15 @@ defmodule KhymeiaWeb.ProjectLive do
     if connected?(socket) do
       Runtime.subscribe_sessions()
       Workflow.subscribe_all()
+      Worktrees.subscribe()
     end
 
     {:ok,
      assign(socket,
        terminal: nil,
        terminals: [],
+       worktrees: [],
+       worktree_name: "",
        terminal_harness: nil,
        terminal_options: []
      )}
@@ -58,6 +61,7 @@ defmodule KhymeiaWeb.ProjectLive do
          )
          |> assign_options()
          |> load()
+         |> load_worktrees()
          |> maybe_load_git()
          |> maybe_load_terminals(params)}
     end
@@ -84,6 +88,64 @@ defmodule KhymeiaWeb.ProjectLive do
   end
 
   def handle_event("refresh_git", _params, socket), do: {:noreply, load_git(socket)}
+
+  ## Worktrees
+
+  def handle_event("name_worktree", %{"worktree" => %{"name" => name}}, socket),
+    do: {:noreply, assign(socket, worktree_name: name)}
+
+  def handle_event("create_worktree", %{"worktree" => %{"name" => name}}, socket) do
+    case Worktrees.create(socket.assigns.project, name) do
+      {:ok, _worktree} ->
+        {:noreply, socket |> assign(worktree_name: "") |> load_worktrees()}
+
+      {:error, {:invalid, errors}} ->
+        {:noreply, put_flash(socket, :error, describe(errors))}
+    end
+  end
+
+  def handle_event("keep_worktree", %{"id" => id}, socket) do
+    case Worktrees.keep(id) do
+      {:ok, worktree} ->
+        {:noreply,
+         socket
+         |> load_worktrees()
+         |> put_flash(:info, "Directory removed. Branch #{worktree.branch} is yours to merge.")}
+
+      {:error, {:invalid, errors}} ->
+        {:noreply, put_flash(socket, :error, describe(errors))}
+    end
+  end
+
+  def handle_event("discard_worktree", %{"id" => id}, socket) do
+    case Worktrees.discard(id) do
+      {:ok, _worktree} ->
+        {:noreply, socket |> load_worktrees() |> put_flash(:info, "Worktree and branch removed.")}
+
+      {:error, {:invalid, errors}} ->
+        {:noreply, put_flash(socket, :error, describe(errors))}
+    end
+  end
+
+  def handle_event("open_worktree_terminal", %{"id" => id}, socket) do
+    attrs = %{"harness" => socket.assigns.terminal_harness, "worktree" => id}
+
+    case Terminals.start(attrs) do
+      {:ok, terminal} ->
+        {:noreply,
+         socket
+         |> load()
+         |> load_terminals()
+         |> attach(terminal)
+         |> push_patch(to: ~p"/projects/#{socket.assigns.project.id}/terminal?t=#{terminal.id}")}
+
+      {:error, {:invalid, errors}} ->
+        {:noreply, put_flash(socket, :error, "Could not open a terminal: #{describe(errors)}")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Could not open a terminal: #{inspect(reason)}")}
+    end
+  end
 
   ## Terminal
 
@@ -177,6 +239,8 @@ defmodule KhymeiaWeb.ProjectLive do
     {:noreply, socket |> load() |> load_terminals()}
   end
 
+  def handle_info(:worktrees_changed, socket), do: {:noreply, load_worktrees(socket)}
+
   def handle_info(_message, socket), do: {:noreply, load(socket)}
 
   ## Loading
@@ -255,6 +319,17 @@ defmodule KhymeiaWeb.ProjectLive do
           put_flash(socket, :error, "Could not open that terminal")
       end
     end
+  end
+
+  # Each worktree is shown with what the agent actually did in it, read from
+  # git rather than from anything Khymeia recorded.
+  defp load_worktrees(%{assigns: %{project: project}} = socket) do
+    worktrees =
+      project.id
+      |> Worktrees.list_for_project(12)
+      |> Enum.map(&%{record: &1, work: Worktrees.work(&1)})
+
+    assign(socket, worktrees: worktrees)
   end
 
   defp load_terminals(%{assigns: %{project: project}} = socket),
@@ -415,6 +490,86 @@ defmodule KhymeiaWeb.ProjectLive do
       </div>
       <div class="k-grid">
         <.work_card :for={entry <- @active} entry={entry} />
+      </div>
+    </section>
+
+    <section class="k-section" id="project-worktrees">
+      <div class="k-section-head">
+        <h2 class="k-h2">
+          Worktrees <span :if={@worktrees != []} class="k-badge">{length(@worktrees)}</span>
+        </h2>
+        <form
+          id="create-worktree"
+          phx-submit="create_worktree"
+          phx-change="name_worktree"
+          class="k-launcher-form"
+        >
+          <input
+            name="worktree[name]"
+            value={@worktree_name}
+            class="k-input k-input-inline"
+            placeholder="What is it for?"
+            autocomplete="off"
+          />
+          <button type="submit" class="k-btn" phx-disable-with="Creating…">New worktree</button>
+        </form>
+      </div>
+
+      <div :if={@worktrees == []} class="k-panel k-empty">
+        An isolated checkout on its own branch, so an agent can work without touching
+        the files you are using. Khymeia never merges one — that stays your call.
+      </div>
+
+      <div :for={%{record: worktree, work: work} <- @worktrees} class="k-panel k-worktree">
+        <div class="k-worktree-head">
+          <span class={[
+            "k-dot",
+            if(Worktrees.Worktree.active?(worktree), do: "k-dot-on", else: "k-dot-off")
+          ]}></span>
+          <span class="k-mono">{worktree.branch}</span>
+          <span class="k-tag">from {worktree.base_branch || "detached"}</span>
+          <span :if={not Worktrees.Worktree.active?(worktree)} class="k-tag">{worktree.status}</span>
+        </div>
+
+        <p class="k-mono k-faint k-truncate">{short_path(worktree.path)}</p>
+
+        <p :if={is_map(work)} class="k-hint">
+          {work.files} file(s) · <span class="k-change-A">+{work.insertions}</span>
+          <span class="k-change-D">−{work.deletions}</span>
+          · {work.commits} commit(s)<span :if={work.untracked > 0}>
+            · {work.untracked} untracked
+          </span>
+        </p>
+
+        <div :if={Worktrees.Worktree.active?(worktree)} class="k-worktree-actions">
+          <button
+            class="k-btn k-btn-sm"
+            phx-click="open_worktree_terminal"
+            phx-value-id={worktree.id}
+            id={"wt-terminal-#{worktree.id}"}
+            disabled={@terminal_options == []}
+          >
+            Open terminal here
+          </button>
+          <button
+            class="k-btn k-btn-ghost k-btn-sm"
+            phx-click="keep_worktree"
+            phx-value-id={worktree.id}
+            id={"wt-keep-#{worktree.id}"}
+            title="Remove the directory, keep the branch to merge yourself"
+          >
+            Keep branch
+          </button>
+          <button
+            class="k-btn k-btn-ghost k-btn-sm k-btn-danger"
+            phx-click="discard_worktree"
+            phx-value-id={worktree.id}
+            id={"wt-discard-#{worktree.id}"}
+            data-confirm={"Remove #{worktree.branch} and everything in it?"}
+          >
+            Discard
+          </button>
+        </div>
       </div>
     </section>
 
