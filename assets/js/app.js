@@ -22,7 +22,7 @@ import "phoenix_html"
 // Establish Phoenix Socket and LiveView configuration.
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
-import {hooks as colocatedHooks} from "phoenix-colocated/khymeia"
+import {hooks as colocatedHooks} from "phoenix-colocated/alkim"
 import topbar from "../vendor/topbar"
 import {Terminal} from "../vendor/xterm"
 import {FitAddon} from "../vendor/xterm-addon-fit"
@@ -82,10 +82,10 @@ const EmbeddedTerminal = {
       allowProposedApi: true,
       convertEol: false,
       cursorBlink: true,
-      fontFamily: styles.getPropertyValue("--k-mono").trim() || "monospace",
+      fontFamily: styles.getPropertyValue("--a-mono").trim() || "monospace",
       fontSize: 13,
       scrollback: 5000,
-      theme: {background: color("--k-sunken"), foreground: color("--k-text"), cursor: color("--k-accent")},
+      theme: {background: color("--a-sunken"), foreground: color("--a-text"), cursor: color("--a-accent")},
     })
 
     this.fit = new FitAddon()

@@ -1,4 +1,4 @@
-defmodule Khymeia.Repo.Migrations.CreateProjects do
+defmodule Alkim.Repo.Migrations.CreateProjects do
   use Ecto.Migration
 
   def up do

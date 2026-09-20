@@ -1,6 +1,6 @@
-defmodule Khymeia.MemorySecrets do
+defmodule Alkim.MemorySecrets do
   @moduledoc "In-memory secrets backend for tests — never touches the real Keychain."
-  @behaviour Khymeia.Providers.Secrets
+  @behaviour Alkim.Providers.Secrets
 
   use Agent
 
@@ -11,7 +11,7 @@ defmodule Khymeia.MemorySecrets do
 
   @impl true
   def put(account, secret) do
-    if Khymeia.Providers.Secrets.valid_secret?(secret),
+    if Alkim.Providers.Secrets.valid_secret?(secret),
       do: Agent.update(__MODULE__, &Map.put(&1, account, secret)),
       else: {:error, :invalid_secret}
   end

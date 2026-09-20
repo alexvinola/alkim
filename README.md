@@ -1,29 +1,29 @@
-# Khymeia
+# Alkim
 
-[![CI](https://github.com/alexvinola/khymeia/actions/workflows/ci.yml/badge.svg)](https://github.com/alexvinola/khymeia/actions/workflows/ci.yml)
+[![CI](https://github.com/alexvinola/alkim/actions/workflows/ci.yml/badge.svg)](https://github.com/alexvinola/alkim/actions/workflows/ci.yml)
 
 **A local-first runtime to supervise, coordinate and verify the coding-agent
 harnesses you already have installed** — Claude Code and Codex today, with
 Kiro CLI, GitHub Copilot CLI, OpenCode and Gemini CLI detected and planned.
 
-Khymeia runs as a long-lived local daemon. Every agent session is a supervised
+Alkim runs as a long-lived local daemon. Every agent session is a supervised
 OTP process driving the real CLI; its output streams as events into a Phoenix
 LiveView UI at <http://127.0.0.1:4777>. On top of single sessions,
 **workflows** put several harnesses to work in roles — an *implementer* that
 writes code, an *advisor* it can consult, an independent read-only *auditor*
 whose findings loop back — with a human able to step in at any checkpoint.
 
-Khymeia is **not** an LLM, a model provider, a new coding agent or a
+Alkim is **not** an LLM, a model provider, a new coding agent or a
 replacement for Claude Code or Codex. It never calls model APIs itself and
 never runs an agent loop of its own: the harnesses do the reasoning, coding and
-tool use; Khymeia handles execution, coordination, state, verification and
+tool use; Alkim handles execution, coordination, state, verification and
 observability.
 
 ---
 
 - [Status](#status)
 - [Quick start](#quick-start)
-- [Using Khymeia](#using-khymeia) — sessions · workflows · cloud providers
+- [Using Alkim](#using-alkim) — sessions · workflows · cloud providers
 - [Harness adapters](#harness-adapters)
 - [Architecture](#architecture)
 - [Security and trust model](#security-and-trust-model)
@@ -66,7 +66,7 @@ mix phx.server
 ```
 
 Open <http://127.0.0.1:4777>. Add the folder you work in as a project; the
-sidebar lists the harnesses Khymeia found on your machine.
+sidebar lists the harnesses Alkim found on your machine.
 
 No agent CLI? In development a **Fake harness** is always available, so the
 whole runtime can be tried without one. Choose it in *New session* and pick a
@@ -77,14 +77,14 @@ scenario as its "model":
 | `success`, `stream` | messages / twenty streamed lines, then waits for a follow-up |
 | `failure` | writes to stderr and exits with status 3 |
 | `hang` | never finishes — try *Stop* |
-| `ask-advisor`, `ask-human` | an implementer asking Khymeia for help (workflows) |
+| `ask-advisor`, `ask-human` | an implementer asking Alkim for help (workflows) |
 | `advise`, `audit-pass`, `audit-findings`, `audit-fix-once` | advisor and auditor behaviours (workflows) |
 | `whoami` | reports which provider profile reached the process (never the secret) |
 
 Port 4777 keeps clear of the usual 3000/4000/5000/8080 dev ports; change it
-with `KHYMEIA_PORT`.
+with `ALKIM_PORT`.
 
-## Using Khymeia
+## Using Alkim
 
 ### Sessions
 
@@ -120,15 +120,15 @@ place.
 
 ### Worktrees
 
-Two agents in one repository is the sharpest edge Khymeia has: they share a
+Two agents in one repository is the sharpest edge Alkim has: they share a
 working tree, overwrite each other's edits, and an auditor cannot tell whose
 change is whose. *Project → Overview → New worktree* gives a piece of work its
 own directory and its own branch, off the current `HEAD`.
 
 - The directory is created **beside** the repository
-  (`<repo>-khymeia-<slug>`), because inside it every `git status` in the
+  (`<repo>-alkim-<slug>`), because inside it every `git status` in the
   project would report it as untracked files. It has to be inside the allowed
-  workspace roots like any other workspace, and Khymeia says so if it is not.
+  workspace roots like any other workspace, and Alkim says so if it is not.
 - Each worktree shows what the agent actually did there, read from git: files
   touched, insertions and deletions against the base commit, commits made,
   untracked files.
@@ -139,13 +139,13 @@ own directory and its own branch, off the current `HEAD`.
   run defaults to a fresh one, because several agents in one folder is
   exactly the case isolation is for: the auditor then sees what the
   implementer changed and nothing else.
-- A fresh worktree's branch is named after the work (`khymeia/add-a-greeting-…`),
+- A fresh worktree's branch is named after the work (`alkim/add-a-greeting-…`),
   so it is recognisable in `git branch`.
 - Where isolation is not possible — the project is not a repository, or the
   directory beside it falls outside the allowed roots — the form says so and
   does not offer it, rather than failing on submit.
 
-**Khymeia never merges.** *Keep branch* removes the directory and leaves the
+**Alkim never merges.** *Keep branch* removes the directory and leaves the
 branch for you to review, rebase or merge yourself. *Discard* removes both.
 Nothing here writes to your main branch — a tool that quietly integrates agent
 work is a tool you cannot trust with a repository.
@@ -153,24 +153,24 @@ work is a tool you cannot trust with a repository.
 ### Terminals
 
 *Project → Terminal* runs the harness's **own interactive interface** inside
-Khymeia, on a real pseudo-terminal, in the project's folder. This is the lane
-a human drives, and the point is that Khymeia does not reimplement it: model,
+Alkim, on a real pseudo-terminal, in the project's folder. This is the lane
+a human drives, and the point is that Alkim does not reimplement it: model,
 effort, permission mode and every slash command keep working, because it *is*
 the CLI.
 
-Khymeia owns the process, not the interface:
+Alkim owns the process, not the interface:
 
-- the runtime spawns `priv/bin/khymeia-pty`, a small C helper that holds the
+- the runtime spawns `priv/bin/alkim-pty`, a small C helper that holds the
   pseudo-terminal (the BEAM cannot allocate or resize one) and relays it with
   Erlang's `{packet, 4}` framing;
-- closing the helper's stdin kills the harness, so nothing outlives Khymeia —
+- closing the helper's stdin kills the harness, so nothing outlives Alkim —
   verified down to `kill -9` on the whole daemon;
 - **output is written to disk as it happens**, so a terminal can be reopened
-  and read after Khymeia itself restarted, not just after the browser closed;
+  and read after Alkim itself restarted, not just after the browser closed;
 - the browser's window size drives `TIOCSWINSZ`, so the TUI lays itself out
   for what you can actually see.
 
-**Saved output is the one place Khymeia keeps raw harness output**, and a
+**Saved output is the one place Alkim keeps raw harness output**, and a
 terminal shows whatever appeared on screen. So the directory is `0700`, each
 log is `0600` and capped at 1 MB, and *Delete* removes a terminal together
 with everything it printed. Set `:terminal_log_dir` to move them elsewhere.
@@ -182,12 +182,12 @@ same saved output — because a terminal *is* the conversation as far as the
 user is concerned.
 
 Verified end to end against Claude Code 2.1.212: an exchange, `/exit`, reopen,
-and the previous exchange is there. Khymeia names the conversation itself with
+and the previous exchange is there. Alkim names the conversation itself with
 `--session-id <uuid>` and reopens it with `--resume`. Codex accepts no
 caller-chosen id, so it resumes with its own `resume --last` for that
 workspace; that path is not yet exercised.
 
-When the harness cannot continue (it says so and exits at once), Khymeia
+When the harness cannot continue (it says so and exits at once), Alkim
 prints a line saying so and starts a fresh one in the same place, rather than
 handing back a terminal that died on arrival. A stop you asked for, or a
 harness killed by a signal, never triggers that.
@@ -198,19 +198,19 @@ harness's own quit sequence (`/exit` for Claude Code, verified) and only
 signals it if it will not go. Adapters without a verified quit sequence are
 signalled directly, and say so rather than having one guessed for them.
 
-**A clean environment matters more than it looks.** Khymeia is often started
+**A clean environment matters more than it looks.** Alkim is often started
 from an agent's own terminal, and Claude Code exports two dozen `CLAUDE_*`
 variables to its subprocesses — session ids, a messaging socket, "child
-session" markers. Inheriting them made the harness Khymeia started behave as a
+session" markers. Inheriting them made the harness Alkim started behave as a
 continuation of that session and quietly *not persist its conversation at
 all*. Every adapter now clears the inherited variables of its own family
 before spawning, keeping only what it sets itself. This was the whole reason
 resuming appeared not to work.
 
 **What survives, and what does not.** The *conversation* is persisted by the
-harness itself; Khymeia stores its id, workspace and provider profile. The
+harness itself; Alkim stores its id, workspace and provider profile. The
 *scrollback* lives in the terminal's process. The *process* is a child of the
-runtime and dies with it — after a restart Khymeia closes the old terminal and
+runtime and dies with it — after a restart Alkim closes the old terminal and
 offers to resume the conversation rather than pretending the process is alive.
 
 Only harnesses whose interactive mode an adapter declares are offered. A
@@ -219,7 +219,7 @@ merely detected CLI gets no invented command line.
 ### Workflows
 
 *New session → Workflow* runs a declarative workflow in which each **role**
-is played by the harness/model you choose. Khymeia never decides which agent
+is played by the harness/model you choose. Alkim never decides which agent
 is "better".
 
 ```text
@@ -240,7 +240,7 @@ permission guarantees, human checkpoints and a unified timeline
 (`YOU` / `IMPLEMENTER` / `ADVISOR` / `AUDITOR`), all live.
 
 **Roles.** The engine only knows role *kinds*; adding `security_reviewer` or
-`planner` is one entry in `Khymeia.Workflow.Role`.
+`planner` is one entry in `Alkim.Workflow.Role`.
 
 | Role | Kind | Access | Notes |
 |---|---|---|---|
@@ -254,19 +254,19 @@ permission system). For a harness without a read-only mode, the UI and the
 run record say plainly that it is *not* guaranteed.
 
 **Capability tiers** (`fast`, `reasoning`, `audit`) give each role a default
-harness/model — configured in `config :khymeia, :workflow_tiers` or with
-`KHYMEIA_TIER_<NAME>=harness[@profile][:model]` — and you can change any of
+harness/model — configured in `config :alkim, :workflow_tiers` or with
+`ALKIM_TIER_<NAME>=harness[@profile][:model]` — and you can change any of
 them per run.
 
-**How agents talk to Khymeia.** Harnesses share no structured-output format,
+**How agents talk to Alkim.** Harnesses share no structured-output format,
 so roles end their reply with a tagged block any model can write and any
-harness can carry as text. `Khymeia.Workflow.Protocol` is the only parsing
+harness can carry as text. `Alkim.Workflow.Protocol` is the only parsing
 layer:
 
 ```text
-<khymeia:ask-advisor reason="architecture">question</khymeia:ask-advisor>
-<khymeia:ask-human>question</khymeia:ask-human>
-<khymeia:audit>{"status": "findings", "findings": [{"severity": "high", "title": "…", "file": "…", "line": 1}]}</khymeia:audit>
+<alkim:ask-advisor reason="architecture">question</alkim:ask-advisor>
+<alkim:ask-human>question</alkim:ask-human>
+<alkim:audit>{"status": "findings", "findings": [{"severity": "high", "title": "…", "file": "…", "line": 1}]}</alkim:audit>
 ```
 
 Advisor requests pass an explicit, deterministic policy (`max_calls`,
@@ -290,7 +290,7 @@ blamed on the agent; the auditor gets the cumulative list plus the diff.
 Outside a git repository they are reported as unknown, never guessed.
 
 **Definitions** have the shape a YAML/JSON file will use
-(`Khymeia.Workflow.Definition.from_map/1`), with only simple, explicit
+(`Alkim.Workflow.Definition.from_map/1`), with only simple, explicit
 conditions (`<step>.completed|failed|passed|has_findings`) and one bounded
 `repeat`:
 
@@ -314,7 +314,7 @@ One *iteration* is one pass over the steps; each `repeat` starts a new one.
 A **provider profile** runs an installed harness against your own cloud
 instead of its default backend. The CLI still runs **locally** — agent loop,
 tools, permissions, your files — and only model inference goes to the
-provider, which bills it. Khymeia only starts the same CLI with the
+provider, which bills it. Alkim only starts the same CLI with the
 configuration each CLI documents:
 
 | Harness → provider | Configuration |
@@ -333,14 +333,14 @@ identifiers (Bedrock model/inference-profile IDs or ARNs, Foundry/Azure
 deployment names); a profile can carry a default, and Foundry and Codex
 profiles need one.
 
-**Credentials are never stored by Khymeia.** A profile records only *how* to
+**Credentials are never stored by Alkim.** A profile records only *how* to
 obtain one:
 
 | Source | Details |
 |---|---|
 | Ambient | the provider SDK's own chain: AWS profile/SSO, `az login`, gcloud ADC |
-| Environment variable | a variable of Khymeia's own process (a `brew services` daemon does not see your shell exports) |
-| macOS Keychain — API key | pasted once, written to the Keychain (service `khymeia`) through `security -i` on stdin, so it never appears in any process's arguments |
+| Environment variable | a variable of Alkim's own process (a `brew services` daemon does not see your shell exports) |
+| macOS Keychain — API key | pasted once, written to the Keychain (service `alkim`) through `security -i` on stdin, so it never appears in any process's arguments |
 | macOS Keychain — AWS access keys | access key ID, secret and optional session token entered in a form instead of editing `~/.aws/credentials` |
 
 Stored credentials are read when each turn starts (so rotation needs no
@@ -372,10 +372,10 @@ Claude Code; and `env` entries in `~/.claude/settings.json` (e.g. from
 |---|---|---|
 | Claude Code | integrated | `claude -p --output-format stream-json --verbose [--model] [--permission-mode] [--resume ID] -- PROMPT` |
 | Codex | integrated | `codex exec --json [-m] [-c …] -- PROMPT`, `codex exec resume --json … -- THREAD PROMPT` |
-| Fake | dev/test | `priv/bin/khymeia-fake-harness` |
+| Fake | dev/test | `priv/bin/alkim-fake-harness` |
 | Kiro CLI, Copilot CLI, OpenCode, Gemini CLI | detected only | no adapter yet — the UI says so |
 
-An adapter implements `Khymeia.Harness`. Adapters are pure modules — they
+An adapter implements `Alkim.Harness`. Adapters are pure modules — they
 build argv, parse output lines and declare capabilities; the session process
 owns the OS process:
 
@@ -383,7 +383,7 @@ owns the OS process:
 @callback id() :: atom()
 @callback name() :: String.t()
 @callback detect() :: {:ok, %{executable: path, version: String.t() | nil}} | :not_found
-@callback capabilities() :: Khymeia.Harness.Capabilities.t()
+@callback capabilities() :: Alkim.Harness.Capabilities.t()
 @callback build_command(turn) :: {:ok, %{executable: path, args: [String.t()], env: [...]}} | {:error, term}
 @callback parse_output(:stdout | :stderr, line :: String.t()) :: [event]
 @callback list_models(executable) :: {:ok, [model]} | :error   # optional
@@ -400,8 +400,8 @@ declares.
 - Non-interactive runs cannot ask for approval mid-turn. In `acceptEdits`,
   Claude Code cannot run shell commands (verified: an implementer could not
   run `python3`); use `auto` or allowlist commands in your Claude Code
-  settings. Khymeia never bypasses permissions.
-- Codex refuses to run outside a Git repository; Khymeia does not pass
+  settings. Alkim never bypasses permissions.
+- Codex refuses to run outside a Git repository; Alkim does not pass
   `--skip-git-repo-check`.
 - Follow-up messages go between turns, not during a running turn.
 - *Stop* sends SIGTERM to the harness (SIGKILL after 5 s); well-behaved CLIs
@@ -411,11 +411,11 @@ declares.
 - Concurrent sessions on the same workspace are not isolated from each other
   yet — see the [roadmap](#roadmap).
 
-**Adding an adapter:** implement `Khymeia.Harness` in
-`lib/khymeia/harness/<name>.ex`, add it to `config :khymeia,
-:harness_adapters`, drop it from `Khymeia.Harness.planned/0`, and test
+**Adding an adapter:** implement `Alkim.Harness` in
+`lib/alkim/harness/<name>.ex`, add it to `config :alkim,
+:harness_adapters`, drop it from `Alkim.Harness.planned/0`, and test
 `build_command/1` and `parse_output/2` as pure functions — no real CLI needed
-(see `test/khymeia/harness/adapters_test.exs`). Take every flag from the
+(see `test/alkim/harness/adapters_test.exs`). Take every flag from the
 installed CLI's `--help` or its official docs.
 
 ## Architecture
@@ -425,7 +425,7 @@ installed CLI's `--help` or its official docs.
                         │
            ┌────────────┴────────────┐
            ▼                         ▼
-   Khymeia.Runtime            Khymeia.Workflow           public APIs
+   Alkim.Runtime            Alkim.Workflow           public APIs
    (sessions)                 (multi-agent runs)
            │                         │ owns sessions of its roles
            ▼                         ▼
@@ -433,7 +433,7 @@ installed CLI's `--help` or its official docs.
      └─ SessionServer ◄──────── Workflow.Server
            │  owns one Erlang Port
            ▼
-     priv/bin/khymeia-exec    POSIX wrapper: stdin from /dev/null, stdout/stderr
+     priv/bin/alkim-exec    POSIX wrapper: stdin from /dev/null, stdout/stderr
            │                  tagged, harness killed if the port closes
            ▼
      claude -p / codex exec   the CLI you installed (optionally → your cloud)
@@ -445,25 +445,25 @@ installed CLI's `--help` or its official docs.
 ### Supervision tree
 
 ```text
-Khymeia.Application (one_for_one)
-├── KhymeiaWeb.Telemetry
-├── Khymeia.Repo                          SQLite
+Alkim.Application (one_for_one)
+├── AlkimWeb.Telemetry
+├── Alkim.Repo                          SQLite
 ├── Ecto.Migrator                         releases migrate on boot
 ├── Task                                  mark work left active by a previous run
-├── Phoenix.PubSub                        transport of Khymeia.Runtime.EventBus
-├── Khymeia.Runtime.Supervisor (rest_for_one)
-│   ├── Khymeia.Runtime.Registry          session id → pid + summary
-│   ├── Khymeia.Runtime.SessionSupervisor DynamicSupervisor
+├── Phoenix.PubSub                        transport of Alkim.Runtime.EventBus
+├── Alkim.Runtime.Supervisor (rest_for_one)
+│   ├── Alkim.Runtime.Registry          session id → pid + summary
+│   ├── Alkim.Runtime.SessionSupervisor DynamicSupervisor
 │   │   └── SessionServer …               :temporary
-│   ├── Khymeia.Workflow.Registry
-│   ├── Khymeia.Workflow.Supervisor       DynamicSupervisor
+│   ├── Alkim.Workflow.Registry
+│   ├── Alkim.Workflow.Supervisor       DynamicSupervisor
 │   │   └── Workflow.Server …             :temporary
-│   ├── Khymeia.Terminals.Registry        terminal id → pid
-│   ├── Khymeia.Terminals.Supervisor      DynamicSupervisor
+│   ├── Alkim.Terminals.Registry        terminal id → pid
+│   ├── Alkim.Terminals.Supervisor      DynamicSupervisor
 │   │   └── Terminals.Server …            :temporary, owns one pty helper
-│   ├── Khymeia.Runtime.CrashMonitor      records crashed sessions and workflows
-│   └── Khymeia.Harness.Discovery         installed harnesses and their models
-└── KhymeiaWeb.Endpoint
+│   ├── Alkim.Runtime.CrashMonitor      records crashed sessions and workflows
+│   └── Alkim.Harness.Discovery         installed harnesses and their models
+└── AlkimWeb.Endpoint
 ```
 
 ### Design decisions
@@ -497,7 +497,7 @@ starting ──► running ──► completed     exit 0, not resumable
                └───────► stopped       user, owner workflow gone, shutdown
 ```
 
-Session events (`{:session_event, %Khymeia.Runtime.Event{}}`):
+Session events (`{:session_event, %Alkim.Runtime.Event{}}`):
 `session.started|input|resumed|output|waiting|completed|failed|stopped`, with
 output kinds `assistant`, `reasoning`, `tool`, `stdout`, `stderr`, `system`,
 `error`, `result`. Workflow events (`{:workflow_event, …}`):
@@ -507,7 +507,7 @@ output kinds `assistant`, `reasoning`, `tool`, `stdout`, `stderr`, `system`,
 
 ## Security and trust model
 
-Khymeia starts agents that read and write your files, so it assumes **one
+Alkim starts agents that read and write your files, so it assumes **one
 trusted local user** and is built to be unreachable by anyone else:
 
 - **Loopback only**, `127.0.0.1` by default, with no authentication: anyone
@@ -515,7 +515,7 @@ trusted local user** and is built to be unreachable by anyone else:
   without real authentication in front.
 - **DNS-rebinding protection:** requests whose `Host` is not a loopback name
   are rejected, and LiveView sockets only accept loopback origins, so a web
-  page you visit cannot talk to Khymeia.
+  page you visit cannot talk to Alkim.
 - **No shell:** harnesses start with `Port` + argv; the prompt is one argument
   after `--`, so it cannot inject flags or shell syntax. The UI can only pick
   an installed adapter, never run a command.
@@ -526,8 +526,8 @@ trusted local user** and is built to be unreachable by anyone else:
   sandbox modes must be ones the adapter declares; provider settings are
   plain values, safe as environment variables and TOML strings.
 - **A clean environment:** a harness starts with the inherited variables of
-  its own family cleared, so a session Khymeia starts is never a continuation
-  of whatever session happened to launch Khymeia.
+  its own family cleared, so a session Alkim starts is never a continuation
+  of whatever session happened to launch Alkim.
 - **No stored secrets:** each CLI keeps its own auth; provider credentials
   are referenced, not stored (see [Cloud providers](#cloud-providers)); the
   daemon's own secrets (`SECRET_KEY_BASE`, `RELEASE_COOKIE`, `DATABASE_PATH`)
@@ -537,27 +537,27 @@ trusted local user** and is built to be unreachable by anyone else:
   whole process *group*, so a TUI's own subprocesses go with it, and every
   wait it performs is bounded so it can never hang holding a terminal open.
 - **Terminals are argv too:** an embedded terminal runs an adapter-built argv
-  on a pseudo-terminal, never a shell. Khymeia offers one only for harnesses
+  on a pseudo-terminal, never a shell. Alkim offers one only for harnesses
   whose interactive mode an adapter declares; the UI cannot ask for an
   arbitrary command.
 
-What Khymeia does *not* protect against: the agents themselves. A harness has
+What Alkim does *not* protect against: the agents themselves. A harness has
 whatever power its configuration and the chosen permission mode give it.
 
 ## Running as a daemon
 
-Khymeia is an OTP release meant to run under `launchd` / `systemd` (and,
+Alkim is an OTP release meant to run under `launchd` / `systemd` (and,
 later, `brew services`):
 
 ```bash
 MIX_ENV=prod mix do compile + assets.deploy
 MIX_ENV=prod mix release
-_build/prod/rel/khymeia/bin/khymeia start     # foreground; `daemon` to background
+_build/prod/rel/alkim/bin/alkim start     # foreground; `daemon` to background
 ```
 
 A release needs no configuration: it migrates its database on boot and keeps
 its data — including a generated cookie-signing secret (`0600`) — in
-`~/Library/Application Support/Khymeia` (macOS) or `$XDG_DATA_HOME/khymeia`.
+`~/Library/Application Support/Alkim` (macOS) or `$XDG_DATA_HOME/alkim`.
 
 A daemon does not inherit your shell's `PATH`, so discovery also searches
 `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.npm-global/bin`,
@@ -568,15 +568,15 @@ extended `PATH` (Node-based CLIs need to find `node`).
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `KHYMEIA_PORT` | `4777` | HTTP port |
-| `KHYMEIA_BIND` | `127.0.0.1` | interface to bind — read [Security](#security-and-trust-model) first |
-| `KHYMEIA_WORKSPACE_ROOTS` | your home directory | colon-separated directories sessions may run in |
-| `KHYMEIA_TURN_TIMEOUT_SECONDS` | none | kill a turn that runs longer than this |
-| `KHYMEIA_TIER_<NAME>` | see `config/config.exs` | default `harness[@profile][:model]` for a workflow tier |
-| `KHYMEIA_EXTRA_PATH` | — | extra directories to search for harness CLIs |
-| `KHYMEIA_<ID>_BIN` | — | pin a binary, e.g. `KHYMEIA_CLAUDE_BIN=/opt/bin/claude` |
-| `KHYMEIA_ENABLE_FAKE_HARNESS` | `false` in releases | offer the demo harness |
-| `KHYMEIA_DATA_DIR` | see above | database and secret location (releases) |
+| `ALKIM_PORT` | `4777` | HTTP port |
+| `ALKIM_BIND` | `127.0.0.1` | interface to bind — read [Security](#security-and-trust-model) first |
+| `ALKIM_WORKSPACE_ROOTS` | your home directory | colon-separated directories sessions may run in |
+| `ALKIM_TURN_TIMEOUT_SECONDS` | none | kill a turn that runs longer than this |
+| `ALKIM_TIER_<NAME>` | see `config/config.exs` | default `harness[@profile][:model]` for a workflow tier |
+| `ALKIM_EXTRA_PATH` | — | extra directories to search for harness CLIs |
+| `ALKIM_<ID>_BIN` | — | pin a binary, e.g. `ALKIM_CLAUDE_BIN=/opt/bin/claude` |
+| `ALKIM_ENABLE_FAKE_HARNESS` | `false` in releases | offer the demo harness |
+| `ALKIM_DATA_DIR` | see above | database and secret location (releases) |
 | `DATABASE_PATH` | per environment | database file (in dev, lets a second instance run alongside) |
 
 Application settings (`config/config.exs`): `harness_adapters`,
@@ -593,18 +593,18 @@ mix precommit    # compile --warnings-as-errors, unused deps, format, test
 [CI](.github/workflows/ci.yml) runs the same checks on every push and pull
 request, with the versions in `.tool-versions`.
 
-- **The fake harness** (`priv/bin/khymeia-fake-harness`) is a real OS process
+- **The fake harness** (`priv/bin/alkim-fake-harness`) is a real OS process
   driven through the same wrapper and port as Claude Code or Codex, so tests
   exercise the whole runtime — streaming, failures, timeouts, crashes,
   workflows, provider plumbing.
-- **Tests never touch your Keychain** (`Khymeia.MemorySecrets`) and never run
+- **Tests never touch your Keychain** (`Alkim.MemorySecrets`) and never run
   a real agent CLI.
 - **Probing real CLIs** is done by hand and kept cost-free: tiny prompts,
   unreachable endpoints, documented example credentials.
 - Commits follow Conventional Commits: `type(scope): summary`.
 
 ```text
-lib/khymeia/
+lib/alkim/
   runtime.ex  workflow.ex  providers.ex      public APIs
   projects.ex git.ex                          projects and repository state
   runtime/     supervisors, session server, registry, crash monitor, event bus, OS process
@@ -614,19 +614,19 @@ lib/khymeia/
   sessions/    session history (Ecto)
   projects/    project schema
   workspace.ex path validation and folder browsing
-lib/khymeia_web/
+lib/alkim_web/
   live/        projects, project, sessions, new session/workflow, session,
                workflow, providers
   components/  layouts (shell), session components, workspace picker
   nav.ex       sidebar state, mounted as a hook on every LiveView
   plugs/       loopback-only guard
-priv/bin/      khymeia-exec (process wrapper), khymeia-fake-harness
+priv/bin/      alkim-exec (process wrapper), alkim-fake-harness
 ```
 
 ## Roadmap
 
 The aim is a local tool that makes working with several coding agents feel
-controlled, observable and safe. Khymeia should stay focused: sessions,
+controlled, observable and safe. Alkim should stay focused: sessions,
 isolated work, reviewable changes and explicit coordination rather than
 becoming a general-purpose development platform. In order:
 
@@ -638,19 +638,19 @@ becoming a general-purpose development platform. In order:
 2. **Worktree isolation** — *landed* (see [Worktrees](#worktrees)): own
    directory, own branch, base branch and commit, changed files with
    insertions and deletions, commits created, and explicit **keep** and
-   **discard**, for terminals, sessions and workflow runs alike. Khymeia
+   **discard**, for terminals, sessions and workflow runs alike. Alkim
    never merges agent work automatically.
 
 3. **Embedded terminal as the primary way to work** — run the harness's own
-   interactive interface inside Khymeia, in the session's worktree and with
+   interactive interface inside Alkim, in the session's worktree and with
    its provider profile, instead of rebuilding its controls. Model, effort,
    permission mode, `/compact`, `/context` all keep working, because it is the
-   real CLI; Khymeia owns and supervises the process, it does not replace the
+   real CLI; Alkim owns and supervises the process, it does not replace the
    interface.
 
    Verified against the installed CLIs, and what makes this cheap:
 
-   - Claude Code accepts `--session-id <uuid>`, so Khymeia picks the
+   - Claude Code accepts `--session-id <uuid>`, so Alkim picks the
      conversation id up front, for interactive and headless runs alike
      (confirmed: the interactive CLI creates `~/.claude/session-env/<uuid>`);
    - `--no-session-persistence` only works with `--print`. That says
@@ -668,7 +668,7 @@ becoming a general-purpose development platform. In order:
    output.
 
    "State survives" means three separate things, and only two are free: the
-   *conversation* (the CLI persists it; Khymeia stores id, worktree and
+   *conversation* (the CLI persists it; Alkim stores id, worktree and
    profile), the *scrollback* (a bounded output buffer replayed on reattach)
    and the *live process* (a child of the runtime dies with it — recovery is
    relaunching with `--resume`, not keeping the process alive).
@@ -689,7 +689,7 @@ becoming a general-purpose development platform. In order:
    implement/fix steps.
 
 5. **Project and session workspace** — make active work the main view of
-   Khymeia. The shell (projects, sidebar, per-project overview, repository
+   Alkim. The shell (projects, sidebar, per-project overview, repository
    tab) is in place; what remains depends on worktrees and diffs. A repository
    should show its running, waiting and completed sessions together with their
    harness, branch, worktree, change summary and current state, with multiple
@@ -719,7 +719,7 @@ becoming a general-purpose development platform. In order:
    capabilities instead of trusting completion claims: per-role allowed
    commands, repository-defined verification commands, tests, linting and
    build results captured as workflow events, results passed to auditors, and
-   a clear distinction between model claims and checks Khymeia actually ran.
+   a clear distinction between model claims and checks Alkim actually ran.
 
 10. **Workflow evolution** — keep workflows deterministic while making them
     more useful: reusable workflow definitions, additional reviewer and
@@ -729,10 +729,10 @@ becoming a general-purpose development platform. In order:
 
 11. **Optional context integration** — let external repository-context tooling
     prepare or synchronize harness-specific instructions before a session
-    starts, without making Khymeia responsible for organisation-wide
+    starts, without making Alkim responsible for organisation-wide
     knowledge.
 
-Deliberately out of scope: a model or agent loop of Khymeia's own, direct
+Deliberately out of scope: a model or agent loop of Alkim's own, direct
 model API calls, automatic task decomposition, autonomous model routing,
 automatic merging, remote execution, multi-user collaboration and
 organisation-wide context platforms.

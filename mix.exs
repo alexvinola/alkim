@@ -2,8 +2,8 @@ defmodule Mix.Tasks.Compile.Native do
   @moduledoc """
   Builds the small C helpers in `c_src/` into `priv/bin/`.
 
-  Only `khymeia-pty` needs C: the BEAM cannot allocate a pseudo-terminal or
-  resize one, and an interactive harness needs both. Everything else Khymeia
+  Only `alkim-pty` needs C: the BEAM cannot allocate a pseudo-terminal or
+  resize one, and an interactive harness needs both. Everything else Alkim
   spawns goes through the POSIX shell wrapper instead.
 
   It lives in `mix.exs` because a compiler must exist before `lib/` is built.
@@ -11,7 +11,7 @@ defmodule Mix.Tasks.Compile.Native do
 
   use Mix.Task.Compiler
 
-  @sources %{"khymeia_pty.c" => "khymeia-pty"}
+  @sources %{"alkim_pty.c" => "alkim-pty"}
 
   @impl true
   def run(_args) do
@@ -79,12 +79,12 @@ defmodule Mix.Tasks.Compile.Native do
   end
 end
 
-defmodule Khymeia.MixProject do
+defmodule Alkim.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :khymeia,
+      app: :alkim,
       version: "0.1.0",
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -94,7 +94,7 @@ defmodule Khymeia.MixProject do
       compilers: [:native, :phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
       releases: releases(),
-      name: "Khymeia",
+      name: "Alkim",
       description: "Local-first runtime to supervise coding-agent harnesses"
     ]
   end
@@ -104,7 +104,7 @@ defmodule Khymeia.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {Khymeia.Application, []},
+      mod: {Alkim.Application, []},
       extra_applications: [:logger, :runtime_tools]
     ]
   end
@@ -117,7 +117,7 @@ defmodule Khymeia.MixProject do
 
   defp releases do
     [
-      khymeia: [
+      alkim: [
         include_executables_for: [:unix],
         applications: [runtime_tools: :permanent]
       ]
@@ -177,10 +177,10 @@ defmodule Khymeia.MixProject do
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
-      "assets.build": ["compile", "tailwind khymeia", "esbuild khymeia"],
+      "assets.build": ["compile", "tailwind alkim", "esbuild alkim"],
       "assets.deploy": [
-        "tailwind khymeia --minify",
-        "esbuild khymeia --minify",
+        "tailwind alkim --minify",
+        "esbuild alkim --minify",
         "phx.digest"
       ],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]

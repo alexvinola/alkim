@@ -1,4 +1,4 @@
-defmodule Khymeia.DataCase do
+defmodule Alkim.DataCase do
   @moduledoc """
   This module defines the setup for tests requiring
   access to the application's data layer.
@@ -10,7 +10,7 @@ defmodule Khymeia.DataCase do
   we enable the SQL sandbox, so changes done to the database
   are reverted at the end of every test. If you are using
   PostgreSQL, you can even run database tests asynchronously
-  by setting `use Khymeia.DataCase, async: true`, although
+  by setting `use Alkim.DataCase, async: true`, although
   this option is not recommended for other databases.
   """
 
@@ -18,17 +18,17 @@ defmodule Khymeia.DataCase do
 
   using do
     quote do
-      alias Khymeia.Repo
+      alias Alkim.Repo
 
       import Ecto
       import Ecto.Changeset
       import Ecto.Query
-      import Khymeia.DataCase
+      import Alkim.DataCase
     end
   end
 
   setup tags do
-    Khymeia.DataCase.setup_sandbox(tags)
+    Alkim.DataCase.setup_sandbox(tags)
     :ok
   end
 
@@ -36,7 +36,7 @@ defmodule Khymeia.DataCase do
   Sets up the sandbox based on the test tags.
   """
   def setup_sandbox(tags) do
-    pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Khymeia.Repo, shared: not tags[:async])
+    pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Alkim.Repo, shared: not tags[:async])
 
     on_exit(fn ->
       # Sessions write to the database while shutting down, so they must be
@@ -47,17 +47,17 @@ defmodule Khymeia.DataCase do
   end
 
   def stop_all_sessions do
-    for {_, pid, _, _} <- Khymeia.Workflow.Supervisor.children(), is_pid(pid) do
-      DynamicSupervisor.terminate_child(Khymeia.Workflow.Supervisor, pid)
+    for {_, pid, _, _} <- Alkim.Workflow.Supervisor.children(), is_pid(pid) do
+      DynamicSupervisor.terminate_child(Alkim.Workflow.Supervisor, pid)
     end
 
-    for {_, pid, _, _} <- Khymeia.Runtime.SessionSupervisor.children(), is_pid(pid) do
-      DynamicSupervisor.terminate_child(Khymeia.Runtime.SessionSupervisor, pid)
+    for {_, pid, _, _} <- Alkim.Runtime.SessionSupervisor.children(), is_pid(pid) do
+      DynamicSupervisor.terminate_child(Alkim.Runtime.SessionSupervisor, pid)
     end
 
-    for {_, pid, _, _} <- DynamicSupervisor.which_children(Khymeia.Terminals.Supervisor),
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(Alkim.Terminals.Supervisor),
         is_pid(pid) do
-      DynamicSupervisor.terminate_child(Khymeia.Terminals.Supervisor, pid)
+      DynamicSupervisor.terminate_child(Alkim.Terminals.Supervisor, pid)
     end
 
     :ok

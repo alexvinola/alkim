@@ -1,4 +1,4 @@
-defmodule Khymeia.Repo.Migrations.CreateWorkflows do
+defmodule Alkim.Repo.Migrations.CreateWorkflows do
   use Ecto.Migration
 
   def change do

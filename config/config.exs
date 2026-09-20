@@ -7,13 +7,13 @@
 # General application configuration
 import Config
 
-config :khymeia,
-  ecto_repos: [Khymeia.Repo],
+config :alkim,
+  ecto_repos: [Alkim.Repo],
   generators: [timestamp_type: :utc_datetime]
 
 # Runtime defaults (see config/runtime.exs for the environment variables).
-config :khymeia,
-  harness_adapters: [Khymeia.Harness.Claude, Khymeia.Harness.Codex],
+config :alkim,
+  harness_adapters: [Alkim.Harness.Claude, Alkim.Harness.Codex],
   # Maximum wall time of one harness turn; :infinity lets agents work.
   turn_timeout: :infinity,
   # How long a finished session process keeps its activity log in memory.
@@ -22,7 +22,7 @@ config :khymeia,
   max_workflows: 8,
   # Capability tiers: default harness/model per kind of role. Models are left
   # to each harness (nil) unless you set one. Override per tier with
-  # KHYMEIA_TIER_<NAME>=harness[:model].
+  # ALKIM_TIER_<NAME>=harness[:model].
   workflow_tiers: %{
     fast: %{harness: :claude, model: nil},
     reasoning: %{harness: :claude, model: nil},
@@ -30,16 +30,16 @@ config :khymeia,
   }
 
 # Configure the endpoint
-config :khymeia, KhymeiaWeb.Endpoint,
+config :alkim, AlkimWeb.Endpoint,
   url: [host: "127.0.0.1"],
-  # Only pages served by Khymeia itself may open LiveView sockets.
+  # Only pages served by Alkim itself may open LiveView sockets.
   check_origin: ["//127.0.0.1", "//localhost", "//[::1]"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [html: KhymeiaWeb.ErrorHTML, json: KhymeiaWeb.ErrorJSON],
+    formats: [html: AlkimWeb.ErrorHTML, json: AlkimWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: Khymeia.PubSub,
+  pubsub_server: Alkim.PubSub,
   live_view: [signing_salt: "6RNxt5kW"]
 
 # Configure LiveView
@@ -50,7 +50,7 @@ config :phoenix_live_view,
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",
-  khymeia: [
+  alkim: [
     args:
       ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
     cd: Path.expand("../assets", __DIR__),
@@ -60,7 +60,7 @@ config :esbuild,
 # Configure tailwind (the version is required)
 config :tailwind,
   version: "4.3.0",
-  khymeia: [
+  alkim: [
     args: ~w(
       --input=assets/css/app.css
       --output=priv/static/assets/css/app.css

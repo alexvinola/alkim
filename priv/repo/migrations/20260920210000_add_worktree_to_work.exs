@@ -1,4 +1,4 @@
-defmodule Khymeia.Repo.Migrations.AddWorktreeToWork do
+defmodule Alkim.Repo.Migrations.AddWorktreeToWork do
   use Ecto.Migration
 
   def up do

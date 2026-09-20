@@ -1,4 +1,4 @@
-defmodule Khymeia.RuntimeCase do
+defmodule Alkim.RuntimeCase do
   @moduledoc """
   Tests that start real sessions against the fake harness.
 
@@ -8,18 +8,18 @@ defmodule Khymeia.RuntimeCase do
 
   use ExUnit.CaseTemplate
 
-  alias Khymeia.Runtime.Event
+  alias Alkim.Runtime.Event
 
   using do
     quote do
-      import Khymeia.RuntimeCase
-      alias Khymeia.{Runtime, Session, Sessions}
-      alias Khymeia.Runtime.Event
+      import Alkim.RuntimeCase
+      alias Alkim.{Runtime, Session, Sessions}
+      alias Alkim.Runtime.Event
     end
   end
 
   setup tags do
-    Khymeia.DataCase.setup_sandbox(tags)
+    Alkim.DataCase.setup_sandbox(tags)
     {:ok, workspace: workspace!()}
   end
 
@@ -29,7 +29,7 @@ defmodule Khymeia.RuntimeCase do
   processes may still be shutting down inside it when a test ends).
   """
   def workspace! do
-    [root] = Application.fetch_env!(:khymeia, :workspace_roots)
+    [root] = Application.fetch_env!(:alkim, :workspace_roots)
     dir = Path.join(root, "ws-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
     dir
@@ -49,7 +49,7 @@ defmodule Khymeia.RuntimeCase do
     {_, 0} = run.(["add", "."])
 
     {_, 0} =
-      run.(["-c", "user.email=test@khymeia", "-c", "user.name=Test", "commit", "-qm", "base"])
+      run.(["-c", "user.email=test@alkim", "-c", "user.name=Test", "commit", "-qm", "base"])
 
     dir
   end
@@ -57,8 +57,8 @@ defmodule Khymeia.RuntimeCase do
   @doc "Starts a fake-harness session and subscribes the test to its events."
   def start_fake!(workspace, scenario, opts \\ []) do
     attrs = %{harness: "fake", workspace: workspace, prompt: "test prompt", model: scenario}
-    {:ok, session} = Khymeia.Runtime.start_session(attrs, opts)
-    :ok = Khymeia.Runtime.subscribe_session(session.id)
+    {:ok, session} = Alkim.Runtime.start_session(attrs, opts)
+    :ok = Alkim.Runtime.subscribe_session(session.id)
     session
   end
 
@@ -91,7 +91,7 @@ defmodule Khymeia.RuntimeCase do
   Subscribes to all workflow events *before* starting, so none is missed.
   """
   def start_workflow!(workspace, scenarios, attrs \\ %{}, opts \\ []) do
-    :ok = Khymeia.Workflow.subscribe_all()
+    :ok = Alkim.Workflow.subscribe_all()
 
     roles =
       Map.new(scenarios, fn
@@ -100,7 +100,7 @@ defmodule Khymeia.RuntimeCase do
       end)
 
     attrs = Map.merge(%{workspace: workspace, task: "Implement feature X", roles: roles}, attrs)
-    {:ok, run} = Khymeia.Workflow.start(attrs, opts)
+    {:ok, run} = Alkim.Workflow.start(attrs, opts)
     run
   end
 
@@ -109,10 +109,10 @@ defmodule Khymeia.RuntimeCase do
 
   defp do_await_workflow(id, name, timeout, acc) do
     receive do
-      {:workflow_event, %Khymeia.Workflow.Event{workflow_id: ^id, name: ^name} = event} ->
+      {:workflow_event, %Alkim.Workflow.Event{workflow_id: ^id, name: ^name} = event} ->
         Enum.reverse([event | acc])
 
-      {:workflow_event, %Khymeia.Workflow.Event{workflow_id: ^id} = event} ->
+      {:workflow_event, %Alkim.Workflow.Event{workflow_id: ^id} = event} ->
         do_await_workflow(id, name, timeout, [event | acc])
     after
       timeout ->
@@ -124,13 +124,13 @@ defmodule Khymeia.RuntimeCase do
 
   @doc "Steps of a run, from the store."
   def steps(id) do
-    {:ok, _run, steps} = Khymeia.Workflow.get(id)
+    {:ok, _run, steps} = Alkim.Workflow.get(id)
     steps
   end
 
   @doc "The live session process of a step (the step must have started one)."
   def session_pid(%{session_id: id}) do
-    {:ok, pid} = Khymeia.Runtime.Registry.lookup(id)
+    {:ok, pid} = Alkim.Runtime.Registry.lookup(id)
     pid
   end
 
@@ -139,7 +139,7 @@ defmodule Khymeia.RuntimeCase do
     import Phoenix.LiveViewTest
 
     view |> element("#workspace-picker-trigger") |> render_click()
-    [root | _] = Khymeia.Workspace.roots()
+    [root | _] = Alkim.Workspace.roots()
 
     # Walk down from the root, one folder at a time.
     path

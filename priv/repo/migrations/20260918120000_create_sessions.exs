@@ -1,4 +1,4 @@
-defmodule Khymeia.Repo.Migrations.CreateSessions do
+defmodule Alkim.Repo.Migrations.CreateSessions do
   use Ecto.Migration
 
   def change do

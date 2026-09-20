@@ -1,4 +1,4 @@
-defmodule Khymeia.Repo.Migrations.CreateProviderProfiles do
+defmodule Alkim.Repo.Migrations.CreateProviderProfiles do
   use Ecto.Migration
 
   def change do

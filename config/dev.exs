@@ -1,8 +1,8 @@
 import Config
 
 # Configure your database
-config :khymeia, Khymeia.Repo,
-  database: Path.expand("../khymeia_dev.db", __DIR__),
+config :alkim, Alkim.Repo,
+  database: Path.expand("../alkim_dev.db", __DIR__),
   pool_size: 5,
   stacktrace: true,
   show_sensitive_data_on_connection_error: true
@@ -13,7 +13,7 @@ config :khymeia, Khymeia.Repo,
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
-config :khymeia, KhymeiaWeb.Endpoint,
+config :alkim, AlkimWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [ip: {127, 0, 0, 1}],
@@ -21,8 +21,8 @@ config :khymeia, KhymeiaWeb.Endpoint,
   debug_errors: true,
   secret_key_base: "Xej26CRpJK0aiSTsvfCunaT/0aEw6TPx1uqXUe5rxVs/BOCCY5TlxsMlhPrlWZNr",
   watchers: [
-    esbuild: {Esbuild, :install_and_run, [:khymeia, ~w(--sourcemap=inline --watch)]},
-    tailwind: {Tailwind, :install_and_run, [:khymeia, ~w(--watch)]}
+    esbuild: {Esbuild, :install_and_run, [:alkim, ~w(--sourcemap=inline --watch)]},
+    tailwind: {Tailwind, :install_and_run, [:alkim, ~w(--watch)]}
   ]
 
 # ## SSL Support
@@ -49,11 +49,11 @@ config :khymeia, KhymeiaWeb.Endpoint,
 # different ports.
 
 # Enable dev routes
-config :khymeia, dev_routes: true
+config :alkim, dev_routes: true
 
 # The fake harness makes the whole runtime demoable without any agent CLI.
-config :khymeia,
-  harness_adapters: [Khymeia.Harness.Claude, Khymeia.Harness.Codex, Khymeia.Harness.Fake]
+config :alkim,
+  harness_adapters: [Alkim.Harness.Claude, Alkim.Harness.Codex, Alkim.Harness.Fake]
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"

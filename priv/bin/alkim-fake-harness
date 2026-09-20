@@ -1,0 +1,155 @@
+#!/bin/sh
+# alkim-fake-harness — a deterministic stand-in for a coding agent CLI.
+#
+# Used by Alkim.Harness.Fake for demos and tests. It never touches the
+# workspace; it only prints lines and exits.
+#
+# Usage: alkim-fake-harness [--scenario S] [--delay SECONDS] [--resume REF] -- PROMPT
+#
+# Scenarios:
+#   success | stream | failure | hang       generic behaviour
+#   ask-advisor | ask-human                  implementer asking Alkim for help
+#   advise                                   advisor answering
+#   audit-pass | audit-findings              auditor verdicts
+#   audit-fix-once                           findings on audit round 1, pass later
+#   whoami                                   reports the provider profile it runs with
+#
+# With --interactive it behaves like a TUI instead: it reports whether it is
+# on a real terminal, echoes what is typed and exits on "exit" or Ctrl-D.
+# Used to exercise the pty path without a real agent CLI.
+#   (on --resume every scenario acknowledges the message and exits 0)
+#
+# Output protocol (one event per line, stdout):
+#   ref <id>        conversation reference, usable with --resume
+#   say <text>      assistant message
+#   tool <text>     tool invocation
+#   anything else   plain output
+
+scenario=success
+delay=0.4
+resume=""
+interactive=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --scenario) scenario="$2"; shift 2 ;;
+    --delay) delay="$2"; shift 2 ;;
+    --resume) resume="$2"; shift 2 ;;
+    --interactive) interactive=1; shift ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+done
+
+prompt="$*"
+
+if [ "$interactive" = "1" ]; then
+  # A reference starting with "missing-" stands in for a conversation the CLI
+  # cannot find, which is how a real harness refuses to resume.
+  case "$resume" in
+    missing-*)
+      echo "No conversation found with session ID: $resume"
+      exit 1
+      ;;
+  esac
+
+  if [ -t 0 ]; then tty_state="tty"; else tty_state="not-a-tty"; fi
+  echo "fake harness interactive on $tty_state"
+  echo "size $(stty size 2>/dev/null || echo unknown)"
+  [ -n "$resume" ] && echo "resumed $resume"
+  while printf 'fake> '; do
+    read -r line || break
+    case "$line" in
+      exit) echo "bye"; exit 0 ;;
+      size) echo "size $(stty size 2>/dev/null || echo unknown)" ;;
+      *) echo "echo: $line" ;;
+    esac
+  done
+  exit 0
+fi
+
+findings() {
+  echo 'say <alkim:audit>{"status":"findings","findings":[{"severity":"high","title":"Missing input validation","description":"User input reaches the query unchecked.","file":"lib/app.ex","line":12},{"severity":"low","title":"Typo in docs","description":"recieve -> receive"}]}</alkim:audit>'
+}
+
+if [ -n "$resume" ]; then
+  echo "ref $resume"
+  sleep "$delay"
+  echo "say Continuing conversation $resume."
+  sleep "$delay"
+  echo "say You said: $prompt"
+  exit 0
+fi
+
+ref="fake-$$-$(date +%s)"
+echo "ref $ref"
+sleep "$delay"
+
+case "$scenario" in
+  success)
+    echo "say Reading the workspace to understand the request."
+    sleep "$delay"
+    echo "tool read_file README.md"
+    sleep "$delay"
+    echo "say Done. (This is the fake harness: nothing was changed.)"
+    exit 0
+    ;;
+  stream)
+    i=1
+    while [ "$i" -le 20 ]; do
+      echo "step $i/20: simulated work on \"$prompt\""
+      i=$((i + 1))
+      sleep "$delay"
+    done
+    echo "say Streaming finished."
+    exit 0
+    ;;
+  failure)
+    echo "say Trying something that will not work."
+    sleep "$delay"
+    echo "fatal: simulated harness failure" >&2
+    exit 3
+    ;;
+  ask-advisor)
+    echo "say I need a second opinion first."
+    echo 'say <alkim:ask-advisor reason="architecture">Should the cache be a GenServer or ETS?</alkim:ask-advisor>'
+    exit 0
+    ;;
+  ask-human)
+    echo 'say <alkim:ask-human>Should the new endpoint be public?</alkim:ask-human>'
+    exit 0
+    ;;
+  advise)
+    echo "say Recommendation: use ETS owned by a GenServer."
+    exit 0
+    ;;
+  audit-pass)
+    echo "tool read_file lib/app.ex"
+    echo 'say Looks good. <alkim:audit>{"status":"passed","findings":[]}</alkim:audit>'
+    exit 0
+    ;;
+  audit-fix-once)
+    case "$prompt" in
+      *"Audit round: 1"*) findings ;;
+      *) echo 'say Fixed. <alkim:audit>{"status":"passed","findings":[]}</alkim:audit>' ;;
+    esac
+    exit 0
+    ;;
+  audit-findings)
+    findings
+    exit 0
+    ;;
+  whoami)
+    # Reports which provider profile reached the process — never the secret.
+    echo "say provider=${FAKE_PROVIDER:-none} secret=${FAKE_PROVIDER_SECRET:+present}"
+    exit 0
+    ;;
+  hang)
+    echo "say Working on a very long task..."
+    while :; do sleep 1; done
+    ;;
+  *)
+    echo "unknown scenario: $scenario" >&2
+    exit 64
+    ;;
+esac
