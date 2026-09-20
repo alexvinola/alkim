@@ -40,6 +40,16 @@ defmodule KhymeiaWeb.HarnessOptions do
 
   def find(options, value), do: Enum.find(options, &(&1.value == value and not &1.disabled))
 
+  @doc """
+  Only the options whose adapter knows how to start the harness's own TUI.
+  Khymeia never guesses an interactive command line.
+  """
+  def interactive(options) do
+    Enum.filter(options, fn option ->
+      option.harness && function_exported?(option.harness.adapter, :build_interactive, 1)
+    end)
+  end
+
   @doc "Models offered for an option (see `Khymeia.Providers.models/2`)."
   def models(%{profile: nil, harness: h}), do: h.models
   def models(%{profile: p, harness: h}), do: Providers.models(p, h.models)

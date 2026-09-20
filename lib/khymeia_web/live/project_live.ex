@@ -14,10 +14,10 @@ defmodule KhymeiaWeb.ProjectLive do
   import KhymeiaWeb.SessionComponents,
     only: [work_card: 1, work_row: 1, short_path: 1, datetime: 1]
 
-  alias Khymeia.{Git, Projects, Runtime, Workflow}
+  alias Khymeia.{Git, Projects, Runtime, Terminals, Workflow}
   alias KhymeiaWeb.{HarnessOptions, WorkEntry}
 
-  @tabs ~w(overview git settings)
+  @tabs ~w(overview terminal git settings)
 
   # A repository without a .gitignore can report thousands of untracked
   # files; the page shows a workable slice and says how many are left.
@@ -30,7 +30,15 @@ defmodule KhymeiaWeb.ProjectLive do
       Workflow.subscribe_all()
     end
 
-    {:ok, assign(socket, prompt: "", harness: nil, errors: %{})}
+    {:ok,
+     assign(socket,
+       prompt: "",
+       harness: nil,
+       errors: %{},
+       terminal: nil,
+       terminals: [],
+       terminal_harness: nil
+     )}
   end
 
   @impl true
@@ -52,7 +60,8 @@ defmodule KhymeiaWeb.ProjectLive do
          )
          |> assign_options()
          |> load()
-         |> maybe_load_git()}
+         |> maybe_load_git()
+         |> maybe_load_terminals()}
     end
   end
 
@@ -97,7 +106,98 @@ defmodule KhymeiaWeb.ProjectLive do
 
   def handle_event("refresh_git", _params, socket), do: {:noreply, load_git(socket)}
 
+  ## Terminal
+
+  def handle_event("open_terminal", %{"terminal" => %{"harness" => harness}}, socket) do
+    attrs = %{"harness" => harness, "workspace" => socket.assigns.project.path}
+
+    case Terminals.start(attrs) do
+      {:ok, terminal} ->
+        {:noreply, socket |> load_terminals() |> attach(terminal)}
+
+      {:error, {:invalid, errors}} ->
+        {:noreply, put_flash(socket, :error, "Could not open a terminal: #{describe(errors)}")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Could not open a terminal: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("select_terminal", %{"id" => id}, socket) do
+    case Terminals.get(id) do
+      nil -> {:noreply, socket}
+      terminal -> {:noreply, attach(socket, terminal)}
+    end
+  end
+
+  def handle_event("stop_terminal", _params, socket) do
+    if socket.assigns.terminal, do: Terminals.stop(socket.assigns.terminal.id)
+    {:noreply, socket}
+  end
+
+  def handle_event("pick_terminal_harness", %{"terminal" => %{"harness" => harness}}, socket),
+    do: {:noreply, assign(socket, terminal_harness: harness)}
+
+  # Continues the same conversation in a new terminal: the old process is
+  # gone, but the harness kept the conversation itself.
+  def handle_event("resume_terminal", %{"id" => id}, socket) do
+    with %{} = old <- Terminals.get(id),
+         {:ok, terminal} <-
+           Terminals.start(%{
+             "harness" => harness_choice(old),
+             "workspace" => old.workspace,
+             "model" => old.model,
+             "permission_mode" => old.permission_mode,
+             "resume" => old.harness_ref || "last"
+           }) do
+      {:noreply, socket |> load_terminals() |> attach(terminal)}
+    else
+      {:error, {:invalid, errors}} ->
+        {:noreply, put_flash(socket, :error, "Could not resume: #{describe(errors)}")}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Could not resume that conversation")}
+    end
+  end
+
+  # The browser attached: replay what it missed before it started listening.
+  def handle_event("terminal_attached", _params, %{assigns: %{terminal: nil}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("terminal_attached", _params, socket) do
+    case Terminals.attach(socket.assigns.terminal.id) do
+      {:ok, terminal, scrollback} ->
+        socket = assign(socket, terminal: terminal)
+        {:noreply, write(socket, terminal.id, scrollback)}
+
+      :error ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("terminal_keys", %{"data" => data}, socket) do
+    if socket.assigns.terminal, do: Terminals.send_keys(socket.assigns.terminal.id, data)
+    {:noreply, socket}
+  end
+
+  def handle_event("terminal_resize", %{"rows" => rows, "cols" => cols}, socket) do
+    if socket.assigns.terminal, do: Terminals.resize(socket.assigns.terminal.id, rows, cols)
+    {:noreply, socket}
+  end
+
   @impl true
+  def handle_info({:terminal_output, id, data}, socket),
+    do: {:noreply, write(socket, id, data)}
+
+  def handle_info({:terminal_status, terminal}, socket) do
+    socket =
+      if socket.assigns.terminal && socket.assigns.terminal.id == terminal.id,
+        do: assign(socket, terminal: terminal),
+        else: socket
+
+    {:noreply, load_terminals(socket)}
+  end
+
   def handle_info(_message, socket), do: {:noreply, load(socket)}
 
   ## Loading
@@ -130,6 +230,48 @@ defmodule KhymeiaWeb.ProjectLive do
     assign(socket, active: active, recent: recent, sidebar: Enum.take(active ++ recent, 12))
   end
 
+  defp maybe_load_terminals(%{assigns: %{tab: "terminal"}} = socket) do
+    socket = load_terminals(socket)
+    options = HarnessOptions.interactive(socket.assigns.options)
+
+    socket =
+      assign(socket,
+        terminal_options: options,
+        terminal_harness: socket.assigns.terminal_harness || HarnessOptions.first_value(options)
+      )
+
+    # Re-open whichever terminal of this project is still running.
+    case socket.assigns.terminal || Enum.find(socket.assigns.terminals, &Terminals.alive?(&1.id)) do
+      nil -> socket
+      terminal -> attach(socket, terminal)
+    end
+  end
+
+  defp maybe_load_terminals(socket), do: assign(socket, terminal_options: [])
+
+  defp load_terminals(%{assigns: %{project: project}} = socket),
+    do: assign(socket, terminals: Terminals.list_for_project(project.id, 8))
+
+  # One subscription at a time: a view only ever paints the terminal it shows.
+  defp attach(socket, terminal) do
+    current = socket.assigns.terminal
+    if current && current.id != terminal.id, do: Terminals.unsubscribe(current.id)
+
+    if connected?(socket) and (is_nil(current) or current.id != terminal.id) do
+      Terminals.subscribe(terminal.id)
+    end
+
+    assign(socket, terminal: terminal)
+  end
+
+  defp write(socket, id, data) when byte_size(data) > 0,
+    do: push_event(socket, "terminal:write", %{id: id, data: Base.encode64(data)})
+
+  defp write(socket, _id, _data), do: socket
+
+  defp describe(errors),
+    do: Enum.map_join(errors, "; ", fn {_field, message} -> message end)
+
   defp maybe_load_git(%{assigns: %{tab: "git"}} = socket), do: load_git(socket)
   defp maybe_load_git(socket), do: assign_new(socket, :git, fn -> nil end)
 
@@ -157,7 +299,14 @@ defmodule KhymeiaWeb.ProjectLive do
 
       <nav class="k-tabs k-tabs-page" aria-label="Project">
         <.link
-          :for={{tab, label} <- [{"overview", "Overview"}, {"git", "Git"}, {"settings", "Settings"}]}
+          :for={
+            {tab, label} <- [
+              {"overview", "Overview"},
+              {"terminal", "Terminal"},
+              {"git", "Git"},
+              {"settings", "Settings"}
+            ]
+          }
           patch={~p"/projects/#{@project.id}/#{tab}"}
           aria-current={@tab == tab && "page"}
         >
@@ -166,6 +315,7 @@ defmodule KhymeiaWeb.ProjectLive do
       </nav>
 
       <.overview :if={@tab == "overview"} {assigns} />
+      <.terminal_tab :if={@tab == "terminal"} {assigns} />
       <.git_tab :if={@tab == "git"} {assigns} />
       <.settings :if={@tab == "settings"} {assigns} />
     </Layouts.app>
@@ -235,6 +385,113 @@ defmodule KhymeiaWeb.ProjectLive do
       </div>
     </section>
     """
+  end
+
+  defp terminal_tab(assigns) do
+    ~H"""
+    <section class="k-section k-term-shell" id="project-terminal">
+      <div class="k-term-bar">
+        <div class="k-term-tabs">
+          <button
+            :for={entry <- @terminals}
+            type="button"
+            phx-click="select_terminal"
+            phx-value-id={entry.id}
+            id={"term-tab-#{entry.id}"}
+            class={[
+              "k-term-tab",
+              @terminal && @terminal.id == entry.id && "k-term-tab-on",
+              not Khymeia.Terminals.Terminal.live?(entry) && "k-term-dead"
+            ]}
+          >
+            <span class={["k-dot", live_dot(entry)]}></span>
+            {harness_label(entry.harness)}
+          </button>
+        </div>
+
+        <span class="k-spacer" style="flex:1"></span>
+
+        <form phx-submit="open_terminal" phx-change="pick_terminal_harness" class="k-term-bar">
+          <select name="terminal[harness]" class="k-select k-select-inline" id="terminal_harness">
+            <option
+              :for={option <- @terminal_options}
+              value={option.value}
+              selected={option.value == @terminal_harness}
+            >
+              {option.label}
+            </option>
+          </select>
+          <button
+            type="submit"
+            class="k-btn"
+            disabled={@terminal_options == []}
+            phx-disable-with="Opening…"
+          >
+            New terminal
+          </button>
+        </form>
+
+        <button
+          :if={@terminal && Khymeia.Terminals.Terminal.live?(@terminal)}
+          class="k-btn k-btn-danger"
+          phx-click="stop_terminal"
+          id="stop-terminal"
+        >
+          Stop
+        </button>
+      </div>
+
+      <div :if={@terminal_options == []} class="k-panel k-empty">
+        No installed harness has a verified interactive mode.
+      </div>
+
+      <div :if={@terminal == nil and @terminal_options != []} class="k-panel k-empty">
+        Open a terminal to run the harness's own interface in <span class="k-mono">{short_path(@project.path)}</span>. Khymeia supervises the
+        process; the CLI keeps all of its own commands.
+      </div>
+
+      <div
+        :if={@terminal}
+        id={"terminal-#{@terminal.id}"}
+        class="k-term-screen"
+        phx-hook="EmbeddedTerminal"
+        phx-update="ignore"
+        data-terminal-id={@terminal.id}
+      >
+      </div>
+
+      <div :if={@terminal && not Khymeia.Terminals.Terminal.live?(@terminal)} class="k-term-bar">
+        <span class="k-hint">
+          This terminal has exited (status {@terminal.exit_code}). Resuming asks {harness_label(
+            @terminal.harness
+          )} to reopen this conversation — it can only do so
+          if the CLI saved one.
+        </span>
+        <button
+          class="k-btn"
+          phx-click="resume_terminal"
+          phx-value-id={@terminal.id}
+          id="resume-terminal"
+          phx-disable-with="Resuming…"
+        >
+          Resume conversation
+        </button>
+      </div>
+    </section>
+    """
+  end
+
+  defp live_dot(entry),
+    do: if(Khymeia.Terminals.Terminal.live?(entry), do: "k-dot-on", else: "k-dot-off")
+
+  defp harness_choice(%{harness: harness, provider_profile_id: nil}), do: harness
+  defp harness_choice(%{harness: harness, provider_profile_id: id}), do: "#{harness}@#{id}"
+
+  defp harness_label(id) do
+    case Khymeia.Harness.fetch_adapter(id) do
+      {:ok, adapter} -> adapter.name()
+      :error -> String.capitalize(id)
+    end
   end
 
   defp git_tab(assigns) do

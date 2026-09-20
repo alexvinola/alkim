@@ -13,6 +13,10 @@
 #   audit-pass | audit-findings              auditor verdicts
 #   audit-fix-once                           findings on audit round 1, pass later
 #   whoami                                   reports the provider profile it runs with
+#
+# With --interactive it behaves like a TUI instead: it reports whether it is
+# on a real terminal, echoes what is typed and exits on "exit" or Ctrl-D.
+# Used to exercise the pty path without a real agent CLI.
 #   (on --resume every scenario acknowledges the message and exits 0)
 #
 # Output protocol (one event per line, stdout):
@@ -24,18 +28,36 @@
 scenario=success
 delay=0.4
 resume=""
+interactive=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --scenario) scenario="$2"; shift 2 ;;
     --delay) delay="$2"; shift 2 ;;
     --resume) resume="$2"; shift 2 ;;
+    --interactive) interactive=1; shift ;;
     --) shift; break ;;
     *) break ;;
   esac
 done
 
 prompt="$*"
+
+if [ "$interactive" = "1" ]; then
+  if [ -t 0 ]; then tty_state="tty"; else tty_state="not-a-tty"; fi
+  echo "fake harness interactive on $tty_state"
+  echo "size $(stty size 2>/dev/null || echo unknown)"
+  [ -n "$resume" ] && echo "resumed $resume"
+  while printf 'fake> '; do
+    read -r line || break
+    case "$line" in
+      exit) echo "bye"; exit 0 ;;
+      size) echo "size $(stty size 2>/dev/null || echo unknown)" ;;
+      *) echo "echo: $line" ;;
+    esac
+  done
+  exit 0
+fi
 
 findings() {
   echo 'say <khymeia:audit>{"status":"findings","findings":[{"severity":"high","title":"Missing input validation","description":"User input reaches the query unchecked.","file":"lib/app.ex","line":12},{"severity":"low","title":"Typo in docs","description":"recieve -> receive"}]}</khymeia:audit>'

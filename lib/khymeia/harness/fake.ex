@@ -53,6 +53,25 @@ defmodule Khymeia.Harness.Fake do
   @impl true
   def provider_kinds, do: [:demo]
 
+  @doc """
+  Interactive mode, used to exercise the pseudo-terminal path in tests
+  without any real agent CLI: it reports whether it is on a tty, echoes what
+  is typed and exits on `exit`.
+  """
+  @impl true
+  def build_interactive(session) do
+    resume = if session.resume, do: ["--resume", session.resume], else: []
+    args = ["--interactive"] ++ resume
+
+    {:ok,
+     %{
+       executable: session.executable,
+       args: args,
+       env: [],
+       harness_ref: session.resume || session.session_id
+     }}
+  end
+
   @impl true
   def build_command(turn) do
     scenario = if turn.model in @scenarios, do: turn.model, else: "success"

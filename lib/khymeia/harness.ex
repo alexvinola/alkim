@@ -27,6 +27,22 @@ defmodule Khymeia.Harness do
           optional(:version) => String.t() | nil
         }
 
+  @typedoc """
+  An interactive session: the harness's own TUI, on a pseudo-terminal.
+  `session_id` is the id Khymeia would like the conversation to have — only
+  useful where the CLI accepts one. `resume` continues an existing
+  conversation, or is `"last"` where the CLI only offers "most recent".
+  """
+  @type interactive :: %{
+          required(:workspace) => String.t(),
+          required(:executable) => String.t(),
+          required(:model) => String.t() | nil,
+          required(:permission_mode) => String.t() | nil,
+          required(:resume) => String.t() | nil,
+          required(:session_id) => String.t(),
+          optional(:provider) => provider() | nil
+        }
+
   @type turn :: %{
           required(:prompt) => String.t(),
           required(:workspace) => String.t(),
@@ -58,7 +74,8 @@ defmodule Khymeia.Harness do
   @type launch :: %{
           required(:executable) => String.t(),
           required(:args) => [String.t()],
-          optional(:env) => [{String.t(), String.t() | false}]
+          optional(:env) => [{String.t(), String.t() | false}],
+          optional(:harness_ref) => String.t()
         }
 
   @typedoc "A model the harness itself reported. `id` is what is passed to the CLI."
@@ -89,10 +106,20 @@ defmodule Khymeia.Harness do
   """
   @callback list_models(executable :: String.t()) :: {:ok, [model()]} | :error
 
+  @doc """
+  Which argv starts the harness's *interactive* interface, to be run on a
+  pseudo-terminal. Only implement it for CLIs whose TUI has been verified;
+  Khymeia offers no interactive mode for the others rather than guessing.
+
+  When the CLI accepts a caller-chosen conversation id, return it as
+  `:harness_ref` in the launch so the terminal can be resumed exactly.
+  """
+  @callback build_interactive(interactive()) :: {:ok, launch()} | {:error, term()}
+
   @doc "Provider kinds (`Khymeia.Providers.Profile`) this adapter can target."
   @callback provider_kinds() :: [atom()]
 
-  @optional_callbacks list_models: 1, provider_kinds: 0
+  @optional_callbacks list_models: 1, provider_kinds: 0, build_interactive: 1
 
   @doc "Adapters enabled in this installation (see `config :khymeia, :harness_adapters`)."
   @spec adapters() :: [module()]

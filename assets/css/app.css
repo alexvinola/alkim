@@ -2,6 +2,7 @@
    https://tailwindcss.com/docs/configuration */
 
 @import "tailwindcss" source(none);
+@import "../vendor/xterm.css";
 @import "phoenix-colocated/khymeia/colocated.css";
 @source "../css";
 @source "../js";
@@ -507,3 +508,21 @@ a.k-row:hover { background: var(--k-sunken); }
   width: auto; max-width: 16rem; height: 1.9rem; font-size: 12.5px;
   padding: 0 1.75rem 0 .55rem;
 }
+
+/* Embedded terminal */
+.k-term-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: .6rem; min-height: 0; }
+.k-term-bar { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.k-term-tabs { display: flex; gap: .3rem; overflow-x: auto; }
+.k-term-tab {
+  display: inline-flex; align-items: center; gap: .4rem; padding: .2rem .6rem; border-radius: 6px;
+  border: 1px solid var(--k-border); background: var(--k-surface); color: var(--k-muted);
+  font-size: 12.5px; cursor: pointer; white-space: nowrap;
+}
+.k-term-tab:hover { color: var(--k-text); }
+.k-term-tab-on { border-color: var(--k-accent); color: var(--k-text); background: var(--k-accent-soft); }
+.k-term-screen {
+  min-height: 24rem; height: 60vh; padding: .5rem; border-radius: 8px;
+  background: var(--k-sunken); border: 1px solid var(--k-border);
+}
+.k-term-screen .xterm { height: 100%; }
+.k-term-dead { opacity: .65; }

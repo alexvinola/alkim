@@ -7,6 +7,8 @@ defmodule Khymeia.Runtime.Supervisor do
       ├── Khymeia.Runtime.SessionSupervisor DynamicSupervisor of sessions
       ├── Khymeia.Workflow.Registry         workflow id → pid
       ├── Khymeia.Workflow.Supervisor       DynamicSupervisor of workflows
+      ├── Khymeia.Terminals.Registry        terminal id → pid
+      ├── Khymeia.Terminals.Supervisor      DynamicSupervisor of interactive terminals
       ├── Khymeia.Runtime.CrashMonitor      records crashed sessions/workflows
       └── Khymeia.Harness.Discovery         installed harnesses (cached)
 
@@ -34,6 +36,8 @@ defmodule Khymeia.Runtime.Supervisor do
       Khymeia.Runtime.SessionSupervisor,
       {Registry, keys: :unique, name: Khymeia.Workflow.Registry},
       Khymeia.Workflow.Supervisor,
+      Khymeia.Terminals.Registry,
+      Khymeia.Terminals.Supervisor,
       {Khymeia.Runtime.CrashMonitor,
        watch: [
          {Khymeia.Runtime.Registry, Khymeia.Runtime.SessionServer},

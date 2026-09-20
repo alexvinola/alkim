@@ -118,6 +118,31 @@ defmodule Khymeia.Harness.Claude do
     {:ok, %{executable: turn.executable, args: args, env: env}}
   end
 
+  @doc """
+  The interactive TUI.
+
+  Claude Code accepts `--session-id <uuid>`, so Khymeia names the
+  conversation before it exists and can resume exactly that one later.
+  `--no-session-persistence` only works with `--print`, so an interactive
+  conversation is always saved to disk and always resumable.
+  """
+  @impl true
+  def build_interactive(session) do
+    {args, ref} =
+      case session.resume do
+        nil -> {["--session-id", session.session_id], session.session_id}
+        ref -> {["--resume", ref], ref}
+      end
+
+    args =
+      args ++
+        opt("--model", session.model) ++
+        opt("--permission-mode", session.permission_mode)
+
+    env = [{"CLAUDECODE", false}] ++ provider_env(session[:provider])
+    {:ok, %{executable: session.executable, args: args, env: env, harness_ref: ref}}
+  end
+
   # Documented in Claude Code's "Amazon Bedrock", "Microsoft Foundry" and
   # "Google Vertex AI" guides. The other providers' switches are unset so an
   # inherited variable can never route a profile to the wrong cloud.

@@ -43,6 +43,8 @@ Early and moving fast, but built to be trusted with real work:
 | Workflows (implement → audit → fix loop, advisor, human checkpoints) | working; verified with Claude Code as implementer and auditor on a test repository |
 | Cloud providers (Bedrock, Foundry, Vertex, Azure OpenAI) | implemented from the CLIs' official docs; configuration accepted by the real CLIs, **not yet run against live accounts** |
 | Projects and shell (sidebar, per-project overview, repository tab) | working |
+| Embedded terminals (the harness's own TUI on a real pty) | working; verified end to end with the Claude Code TUI, including a model exchange |
+| Resuming a conversation from an embedded terminal | **not working yet** — see [Terminals](#terminals) |
 | Test suite | 141 tests, no agent CLI required ([CI](.github/workflows/ci.yml)) |
 | Packaging | OTP release works; Homebrew formula pending |
 
@@ -104,6 +106,55 @@ A session page streams the activity live. When the harness can resume a
 conversation (both can), a finished turn leaves the session **waiting**:
 reply to continue the same conversation, *Mark done*, or *Stop* it at any
 time.
+
+### Terminals
+
+*Project → Terminal* runs the harness's **own interactive interface** inside
+Khymeia, on a real pseudo-terminal, in the project's folder. This is the lane
+a human drives, and the point is that Khymeia does not reimplement it: model,
+effort, permission mode and every slash command keep working, because it *is*
+the CLI.
+
+Khymeia owns the process, not the interface:
+
+- the runtime spawns `priv/bin/khymeia-pty`, a small C helper that holds the
+  pseudo-terminal (the BEAM cannot allocate or resize one) and relays it with
+  Erlang's `{packet, 4}` framing;
+- closing the helper's stdin kills the harness, so nothing outlives Khymeia;
+- output is kept in a bounded scrollback, so closing and reopening the browser
+  loses nothing;
+- the browser's window size drives `TIOCSWINSZ`, so the TUI lays itself out
+  for what you can actually see.
+
+**Continuing a conversation — what is and is not verified.** Claude Code
+accepts `--session-id <uuid>`, and the interactive CLI does take it: running
+one creates `~/.claude/session-env/<uuid>`. Khymeia therefore names the
+conversation before it exists and *Resume conversation* passes that id back
+as `--resume`.
+
+What could **not** be made to work against Claude Code 2.1.212: after a real
+exchange in an embedded terminal, no conversation file appeared under
+`~/.claude/projects/…`, and resuming that id found nothing to restore. This
+happened whether the terminal was ended with Khymeia's *Stop* (the CLI exits
+on `SIGTERM` in about half a second, so it is not being cut short) or with
+Ctrl-C twice from inside the TUI. Resuming a conversation **started in an
+embedded terminal does not work yet**; the button is there because it does
+work for conversations the CLI itself has saved, and because the id plumbing
+is the part Khymeia owns. Investigating where the interactive CLI persists a
+conversation is the next step for this feature.
+
+Codex does not accept a caller-chosen id at all, so resuming there uses its
+own `resume --last` for that workspace. This path has not been exercised
+either.
+
+**What survives, and what does not.** The *conversation* is persisted by the
+harness itself; Khymeia stores its id, workspace and provider profile. The
+*scrollback* lives in the terminal's process. The *process* is a child of the
+runtime and dies with it — after a restart Khymeia closes the old terminal and
+offers to resume the conversation rather than pretending the process is alive.
+
+Only harnesses whose interactive mode an adapter declares are offered. A
+merely detected CLI gets no invented command line.
 
 ### Workflows
 
@@ -347,6 +398,9 @@ Khymeia.Application (one_for_one)
 │   ├── Khymeia.Workflow.Registry
 │   ├── Khymeia.Workflow.Supervisor       DynamicSupervisor
 │   │   └── Workflow.Server …             :temporary
+│   ├── Khymeia.Terminals.Registry        terminal id → pid
+│   ├── Khymeia.Terminals.Supervisor      DynamicSupervisor
+│   │   └── Terminals.Server …            :temporary, owns one pty helper
 │   ├── Khymeia.Runtime.CrashMonitor      records crashed sessions and workflows
 │   └── Khymeia.Harness.Discovery         installed harnesses and their models
 └── KhymeiaWeb.Endpoint
@@ -415,8 +469,14 @@ trusted local user** and is built to be unreachable by anyone else:
   are referenced, not stored (see [Cloud providers](#cloud-providers)); the
   daemon's own secrets (`SECRET_KEY_BASE`, `RELEASE_COOKIE`, `DATABASE_PATH`)
   are removed from every harness environment.
-- **No orphans:** the wrapper terminates the harness when its port closes —
-  on Stop, a crash, or the VM dying.
+- **No orphans:** both spawn paths terminate the harness when their port
+  closes — on Stop, a crash, or the VM dying. The pty helper signals the
+  whole process *group*, so a TUI's own subprocesses go with it, and every
+  wait it performs is bounded so it can never hang holding a terminal open.
+- **Terminals are argv too:** an embedded terminal runs an adapter-built argv
+  on a pseudo-terminal, never a shell. Khymeia offers one only for harnesses
+  whose interactive mode an adapter declares; the UI cannot ask for an
+  arbitrary command.
 
 What Khymeia does *not* protect against: the agents themselves. A harness has
 whatever power its configuration and the chosen permission mode give it.
@@ -530,9 +590,12 @@ becoming a general-purpose development platform. In order:
    Verified against the installed CLIs, and what makes this cheap:
 
    - Claude Code accepts `--session-id <uuid>`, so Khymeia picks the
-     conversation id up front, for interactive and headless runs alike;
-   - `--no-session-persistence` only works with `--print`, so interactive
-     sessions are *always* saved to disk and can be resumed;
+     conversation id up front, for interactive and headless runs alike
+     (confirmed: the interactive CLI creates `~/.claude/session-env/<uuid>`);
+   - `--no-session-persistence` only works with `--print`. That says
+     interactive sessions are meant to be saved, but in practice a
+     conversation held in an embedded terminal could not be resumed
+     afterwards — the open question this phase still has to answer;
    - Codex offers `resume <SESSION_ID>`, `fork`, and
      `queue --thread <id> --message <text>` to inject a message into a live
      session.

@@ -1,0 +1,222 @@
+defmodule Khymeia.Terminals.Server do
+  @moduledoc """
+  Owns one interactive harness process through `priv/bin/khymeia-pty`.
+
+  The helper holds the pseudo-terminal; this process holds the helper. That
+  ordering is what keeps a TUI supervised: if this process dies the port
+  closes, the helper sees EOF on stdin and kills the harness, so no agent is
+  ever left running unattended.
+
+  Two things make a terminal different from a session:
+
+    * **Output is bytes, not events.** They are broadcast verbatim and kept
+      in a bounded scrollback so a browser that reconnects sees what it
+      missed. Nothing tries to interpret them.
+    * **Output is bursty.** A TUI repaints constantly, so chunks are
+      coalesced on a short timer instead of broadcasting every read.
+  """
+
+  use GenServer, restart: :temporary
+
+  alias Khymeia.Terminals
+
+  # Enough to redraw a large window and keep some history, small enough that
+  # idle terminals cost nothing worth measuring.
+  @scrollback_bytes 256 * 1024
+  @flush_ms 16
+  @default_size {24, 80}
+
+  defmodule State do
+    @moduledoc false
+    defstruct [
+      :terminal,
+      :port,
+      :pending,
+      :flush_timer,
+      scrollback: [],
+      scrollback_bytes: 0,
+      size: {24, 80}
+    ]
+  end
+
+  ## API
+
+  def start_link(opts) do
+    terminal = Keyword.fetch!(opts, :terminal)
+    GenServer.start_link(__MODULE__, opts, name: Terminals.Registry.via(terminal.id))
+  end
+
+  @doc "Sends raw keystrokes to the terminal."
+  def send_keys(pid, data) when is_binary(data), do: GenServer.cast(pid, {:keys, data})
+
+  @doc "Tells the pseudo-terminal its window changed, so the TUI repaints to fit."
+  def resize(pid, rows, cols) when is_integer(rows) and is_integer(cols),
+    do: GenServer.cast(pid, {:resize, rows, cols})
+
+  @doc "The terminal plus everything in its scrollback, for a client that (re)attaches."
+  def snapshot(pid), do: GenServer.call(pid, :snapshot)
+
+  @doc "Asks the harness to exit; the helper escalates if it will not."
+  def stop(pid), do: GenServer.call(pid, :stop)
+
+  ## Callbacks
+
+  @impl true
+  def init(opts) do
+    Process.flag(:trap_exit, true)
+    state = %State{terminal: Keyword.fetch!(opts, :terminal), size: @default_size}
+    {:ok, state, {:continue, {:spawn, Keyword.fetch!(opts, :launch)}}}
+  end
+
+  @impl true
+  def handle_continue({:spawn, launch}, state) do
+    {rows, cols} = state.size
+
+    port =
+      Port.open({:spawn_executable, helper()}, [
+        :binary,
+        :exit_status,
+        {:packet, 4},
+        args: [launch.executable | launch.args],
+        cd: state.terminal.workspace,
+        env: env(launch)
+      ])
+
+    state = %{state | port: port}
+    Port.command(port, <<?r, rows::16, cols::16>>)
+
+    {:noreply, update(state, status: :running, started_at: DateTime.utc_now())}
+  end
+
+  @impl true
+  def handle_cast({:keys, data}, %State{port: port} = state) when is_port(port) do
+    Port.command(port, <<?d>> <> data)
+    {:noreply, state}
+  end
+
+  def handle_cast({:resize, rows, cols}, %State{port: port} = state) when is_port(port) do
+    if {rows, cols} == state.size do
+      {:noreply, state}
+    else
+      Port.command(port, <<?r, rows::16, cols::16>>)
+      {:noreply, %{state | size: {rows, cols}}}
+    end
+  end
+
+  def handle_cast(_message, state), do: {:noreply, state}
+
+  @impl true
+  def handle_call(:snapshot, _from, state) do
+    scrollback = state.scrollback |> Enum.reverse() |> IO.iodata_to_binary()
+    {:reply, {state.terminal, scrollback}, state}
+  end
+
+  def handle_call(:stop, _from, %State{port: port} = state) when is_port(port) do
+    Port.command(port, <<?k>>)
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:stop, _from, state), do: {:reply, :ok, state}
+
+  @impl true
+  def handle_info({port, {:data, <<?o, chunk::binary>>}}, %State{port: port} = state) do
+    {:noreply, state |> keep(chunk) |> buffer(chunk) |> schedule_flush()}
+  end
+
+  def handle_info({port, {:data, <<?x, code::32>>}}, %State{port: port} = state) do
+    {:noreply, finish(state, code)}
+  end
+
+  def handle_info({port, {:data, _other}}, %State{port: port} = state), do: {:noreply, state}
+
+  # The helper exits right after reporting the status; if it dies first, the
+  # terminal still has to stop cleanly.
+  def handle_info({port, {:exit_status, code}}, %State{port: port} = state) do
+    {:stop, :normal, finish(%{state | port: nil}, state.terminal.exit_code || code)}
+  end
+
+  def handle_info(:flush, state), do: {:noreply, flush(%{state | flush_timer: nil})}
+
+  def handle_info({:EXIT, port, _reason}, %State{port: port} = state),
+    do: {:stop, :normal, %{state | port: nil}}
+
+  def handle_info(_message, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, state) do
+    # Closing the port makes the helper see EOF and take the harness with it.
+    if is_port(state.port), do: Port.close(state.port)
+    flush(state)
+    :ok
+  end
+
+  ## Internals
+
+  defp finish(state, code) do
+    state = flush(state)
+    update(state, status: :exited, exit_code: code, completed_at: DateTime.utc_now())
+  end
+
+  defp update(state, attrs) do
+    terminal = struct(state.terminal, Map.new(attrs))
+    Terminals.save(terminal)
+    Terminals.broadcast(terminal.id, {:terminal_status, terminal})
+    %{state | terminal: terminal}
+  end
+
+  ## Output: coalesced for the wire, bounded for the scrollback
+
+  defp buffer(state, chunk),
+    do: %{state | pending: [chunk | state.pending || []]}
+
+  defp schedule_flush(%State{flush_timer: nil} = state),
+    do: %{state | flush_timer: Process.send_after(self(), :flush, @flush_ms)}
+
+  defp schedule_flush(state), do: state
+
+  defp flush(%State{pending: nil} = state), do: state
+  defp flush(%State{pending: []} = state), do: %{state | pending: nil}
+
+  defp flush(state) do
+    data = state.pending |> Enum.reverse() |> IO.iodata_to_binary()
+    Terminals.broadcast(state.terminal.id, {:terminal_output, state.terminal.id, data})
+
+    if state.flush_timer, do: Process.cancel_timer(state.flush_timer)
+    %{state | pending: nil, flush_timer: nil}
+  end
+
+  # Whole chunks are dropped rather than split: cutting an escape sequence in
+  # half would corrupt the replay for everything that follows it.
+  defp keep(state, chunk) do
+    scrollback = [chunk | state.scrollback]
+
+    trim(%{
+      state
+      | scrollback: scrollback,
+        scrollback_bytes: state.scrollback_bytes + byte_size(chunk)
+    })
+  end
+
+  defp trim(%State{scrollback_bytes: bytes} = state) when bytes <= @scrollback_bytes, do: state
+
+  defp trim(state) do
+    {kept, bytes} =
+      Enum.reduce_while(state.scrollback, {[], 0}, fn chunk, {acc, bytes} ->
+        size = bytes + byte_size(chunk)
+
+        if size > @scrollback_bytes,
+          do: {:halt, {acc, bytes}},
+          else: {:cont, {[chunk | acc], size}}
+      end)
+
+    %{state | scrollback: Enum.reverse(kept), scrollback_bytes: bytes}
+  end
+
+  defp env(launch) do
+    for {key, value} <- Map.get(launch, :env, []) do
+      {String.to_charlist(key), if(value == false, do: false, else: String.to_charlist(value))}
+    end
+  end
+
+  defp helper, do: Application.app_dir(:khymeia, "priv/bin/khymeia-pty")
+end

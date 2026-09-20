@@ -116,6 +116,32 @@ defmodule Khymeia.Harness.Codex do
     {:ok, %{executable: turn.executable, args: args, env: env}}
   end
 
+  @doc """
+  The interactive TUI: `codex` with no subcommand, or `codex resume`.
+
+  Unlike Claude Code, Codex does not accept a caller-chosen conversation id,
+  so Khymeia cannot name the conversation up front. Resuming therefore uses
+  the CLI's own `--last` (most recent session in this workspace) or an id the
+  user picked; `harness_ref` stays empty until one is known.
+  """
+  @impl true
+  def build_interactive(session) do
+    {provider_args, env} = provider(session[:provider])
+
+    options =
+      if(session.model in [nil, ""], do: [], else: ["-m", session.model]) ++
+        sandbox(session.permission_mode) ++ provider_args
+
+    args =
+      case session.resume do
+        nil -> options
+        "last" -> ["resume", "--last"] ++ options
+        ref -> ["resume", ref] ++ options
+      end
+
+    {:ok, %{executable: session.executable, args: args, env: env}}
+  end
+
   # Providers are configured with `-c` overrides, so the user's
   # ~/.codex/config.toml is never modified. Values were validated as plain
   # (no quotes or backslashes) before they get here.

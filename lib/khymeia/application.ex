@@ -40,6 +40,11 @@ defmodule Khymeia.Application do
         {0, _} -> :ok
         {n, _} -> Logger.info("marked #{n} interrupted workflow(s) from a previous run as failed")
       end
+
+      case Khymeia.Terminals.close_interrupted() do
+        {0, _} -> :ok
+        {n, _} -> Logger.info("closed #{n} terminal(s) left open by a previous run")
+      end
     end
   end
 

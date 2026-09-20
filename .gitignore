@@ -39,3 +39,5 @@ npm-debug.log
 *.db
 *.db-*
 
+# Built from c_src/ by the :native compiler; never committed.
+/priv/bin/khymeia-pty

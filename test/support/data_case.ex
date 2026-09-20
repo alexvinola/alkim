@@ -55,6 +55,11 @@ defmodule Khymeia.DataCase do
       DynamicSupervisor.terminate_child(Khymeia.Runtime.SessionSupervisor, pid)
     end
 
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(Khymeia.Terminals.Supervisor),
+        is_pid(pid) do
+      DynamicSupervisor.terminate_child(Khymeia.Terminals.Supervisor, pid)
+    end
+
     :ok
   end
 

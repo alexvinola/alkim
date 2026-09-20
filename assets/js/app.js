@@ -24,6 +24,8 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/khymeia"
 import topbar from "../vendor/topbar"
+import {Terminal} from "../vendor/xterm"
+import {FitAddon} from "../vendor/xterm-addon-fit"
 
 // Renders the time elapsed since data-since (ISO 8601) and ticks locally.
 // Purely presentational: no requests are made to the runtime.
@@ -66,11 +68,66 @@ const SubmitOnMetaEnter = {
   },
 }
 
+
+// An embedded terminal. The runtime owns the pseudo-terminal and sends raw
+// bytes; this only paints them and reports the window size back, so the TUI
+// lays itself out for what the user can actually see. Output is base64 so
+// that a byte sequence which is not valid UTF-8 cannot break the channel.
+const EmbeddedTerminal = {
+  mounted() {
+    const styles = getComputedStyle(document.documentElement)
+    const color = name => styles.getPropertyValue(name).trim()
+
+    this.term = new Terminal({
+      allowProposedApi: true,
+      convertEol: false,
+      cursorBlink: true,
+      fontFamily: styles.getPropertyValue("--k-mono").trim() || "monospace",
+      fontSize: 13,
+      scrollback: 5000,
+      theme: {background: color("--k-sunken"), foreground: color("--k-text"), cursor: color("--k-accent")},
+    })
+
+    this.fit = new FitAddon()
+    this.term.loadAddon(this.fit)
+    this.term.open(this.el)
+
+    this.term.onData(data => this.pushEvent("terminal_keys", {data}))
+
+    this.handleEvent("terminal:write", ({id, data}) => {
+      if (id !== this.el.dataset.terminalId) return
+      this.term.write(Uint8Array.from(atob(data), c => c.charCodeAt(0)))
+    })
+
+    // The window drives the size, so refit whenever the pane changes.
+    this.observer = new ResizeObserver(() => this.refit())
+    this.observer.observe(this.el)
+    this.refit()
+    this.term.focus()
+    this.pushEvent("terminal_attached", {})
+  },
+
+  refit() {
+    if (this.el.clientHeight === 0) return
+    this.fit.fit()
+    const {rows, cols} = this.term
+    if (rows === this.rows && cols === this.cols) return
+    this.rows = rows
+    this.cols = cols
+    this.pushEvent("terminal_resize", {rows, cols})
+  },
+
+  destroyed() {
+    this.observer?.disconnect()
+    this.term?.dispose()
+  },
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, Elapsed, FollowTail, SubmitOnMetaEnter},
+  hooks: {...colocatedHooks, Elapsed, EmbeddedTerminal, FollowTail, SubmitOnMetaEnter},
 })
 
 // Show progress bar on live navigation and form submits
