@@ -1,6 +1,6 @@
-defmodule Khymeia.Workflow.Git do
+defmodule Khymeia.Git do
   @moduledoc """
-  What changed in a workspace, as far as git can tell reliably.
+  What git can tell reliably about a workspace.
 
   Paths are relative to the workspace, which may be a subdirectory of a
   repository. A *snapshot* maps every path git reports as modified/untracked to the hash
@@ -45,6 +45,99 @@ defmodule Khymeia.Workflow.Git do
       Map.new(Enum.zip(present, hashes) ++ Enum.map(deleted, &{&1, :deleted}))
     else
       _ -> :unavailable
+    end
+  end
+
+  @type status :: %{
+          branch: String.t() | nil,
+          upstream: String.t() | nil,
+          ahead: non_neg_integer() | nil,
+          behind: non_neg_integer() | nil,
+          changes: [%{code: String.t(), path: String.t()}],
+          commits: [%{hash: String.t(), subject: String.t(), author: String.t(), at: String.t()}]
+        }
+
+  @doc """
+  What the workspace looks like right now: branch, distance from its
+  upstream, uncommitted changes and the last commits. `:unavailable` outside
+  a git repository — the UI says so rather than showing an empty repo.
+  """
+  @spec status(String.t()) :: status() | :unavailable
+  def status(workspace) do
+    with {:ok, git} <- git(),
+         {:ok, _} <- run(git, workspace, ["rev-parse", "--is-inside-work-tree"]) do
+      {ahead, behind} = tracking(git, workspace)
+
+      %{
+        branch: one_line(run(git, workspace, ["rev-parse", "--abbrev-ref", "HEAD"])),
+        upstream:
+          one_line(
+            run(git, workspace, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+          ),
+        ahead: ahead,
+        behind: behind,
+        changes: changes(git, workspace),
+        commits: commits(git, workspace)
+      }
+    else
+      _ -> :unavailable
+    end
+  end
+
+  defp tracking(git, workspace) do
+    case run(git, workspace, ["rev-list", "--left-right", "--count", "@{u}...HEAD"]) do
+      {:ok, out} ->
+        case out |> String.trim() |> String.split(~r/\s+/) do
+          [behind, ahead] -> {parse_int(ahead), parse_int(behind)}
+          _ -> {nil, nil}
+        end
+
+      :error ->
+        {nil, nil}
+    end
+  end
+
+  defp changes(git, workspace) do
+    with {:ok, prefix} <- run(git, workspace, ["rev-parse", "--show-prefix"]),
+         {:ok, out} <-
+           run(git, workspace, [
+             "status",
+             "--porcelain=v1",
+             "--untracked-files=all",
+             "--",
+             "."
+           ]) do
+      prefix = String.trim(prefix)
+
+      for <<code::binary-size(2), " ", path::binary>> <- String.split(out, "\n", trim: true) do
+        %{code: String.trim(code), path: String.replace_prefix(path, prefix, "")}
+      end
+    else
+      _ -> []
+    end
+  end
+
+  defp commits(git, workspace) do
+    case run(git, workspace, ["log", "-n", "8", "--format=%h\t%s\t%an\t%ar"]) do
+      {:ok, out} ->
+        for line <- String.split(out, "\n", trim: true),
+            [hash, subject, author, at] <- [String.split(line, "\t", parts: 4)],
+            do: %{hash: hash, subject: subject, author: author, at: at}
+
+      :error ->
+        []
+    end
+  end
+
+  defp run(git, workspace, args), do: Executable.run(git, ["-C", workspace | args])
+
+  defp one_line({:ok, out}), do: String.trim(out)
+  defp one_line(:error), do: nil
+
+  defp parse_int(value) do
+    case Integer.parse(value) do
+      {n, _} -> n
+      :error -> nil
     end
   end
 

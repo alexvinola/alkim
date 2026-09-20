@@ -8,12 +8,10 @@ defmodule KhymeiaWeb.SessionLiveTest do
 
   alias Khymeia.Runtime
 
-  test "dashboard lists harnesses and live sessions, updating in real time", %{conn: conn} do
-    {:ok, view, html} = live(conn, ~p"/")
+  test "the sessions view lists live sessions, updating in real time", %{conn: conn} do
+    {:ok, view, html} = live(conn, ~p"/sessions")
 
     assert html =~ "Fake harness"
-    assert html =~ "Kiro CLI"
-    assert html =~ "not installed"
     assert html =~ "No active sessions"
 
     session = start_fake!(workspace!(), "hang")

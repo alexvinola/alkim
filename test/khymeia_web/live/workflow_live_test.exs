@@ -102,13 +102,13 @@ defmodule KhymeiaWeb.WorkflowLiveTest do
     eventually(fn -> has_element?(view, "#workflow-status", "completed") end)
   end
 
-  test "the dashboard lists workflows and the sessions show their role", %{conn: conn} do
+  test "the sessions view lists workflows and the sessions show their role", %{conn: conn} do
     run =
       start_workflow!(workspace!(), %{implementer: "hang", advisor: nil}, %{
         workflow: "simple-coding"
       })
 
-    {:ok, view, _html} = live(conn, ~p"/")
+    {:ok, view, _html} = live(conn, ~p"/sessions")
 
     eventually(fn -> has_element?(view, "#workflow-#{run.id}") end)
     eventually(fn -> render(view) =~ "implementer" end)

@@ -52,24 +52,13 @@ defmodule KhymeiaWeb.WorkspacePicker do
   end
 
   @impl true
+  def update(%{open: true} = assigns, socket),
+    do: {:ok, socket |> assign(id: assigns.id) |> open()}
+
   def update(assigns, socket), do: {:ok, assign(socket, value: assigns[:value], id: assigns.id)}
 
   @impl true
-  def handle_event("open", _params, socket) do
-    start =
-      if match?({:ok, _}, Workspace.validate(socket.assigns.value || "")),
-        do: socket.assigns.value
-
-    socket =
-      assign(socket,
-        open: true,
-        filter: "",
-        recent: Runtime.recent_workspaces(),
-        roots: Workspace.roots()
-      )
-
-    {:noreply, browse(socket, start || List.first(socket.assigns.roots))}
-  end
+  def handle_event("open", _params, socket), do: {:noreply, open(socket)}
 
   def handle_event("close", _params, socket), do: {:noreply, assign(socket, open: false)}
 
@@ -93,6 +82,22 @@ defmodule KhymeiaWeb.WorkspacePicker do
       {:error, reason} ->
         {:noreply, assign(socket, error: Workspace.error_message(reason))}
     end
+  end
+
+  defp open(socket) do
+    start =
+      if match?({:ok, _}, Workspace.validate(socket.assigns.value || "")),
+        do: socket.assigns.value
+
+    socket =
+      assign(socket,
+        open: true,
+        filter: "",
+        recent: Runtime.recent_workspaces(),
+        roots: Workspace.roots()
+      )
+
+    browse(socket, start || List.first(socket.assigns.roots))
   end
 
   defp browse(socket, nil),
@@ -185,6 +190,7 @@ defmodule KhymeiaWeb.WorkspacePicker do
               </nav>
 
               <form
+                id={"#{@id}-filter-form"}
                 class="k-picker-tools"
                 phx-change="filter"
                 phx-submit="filter"

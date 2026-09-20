@@ -58,6 +58,15 @@ defmodule Khymeia.Sessions do
     |> Repo.all()
   end
 
+  @doc "Recently recorded sessions of one project, newest first."
+  def list_for_project(project_id, limit \\ 20) do
+    SessionRecord
+    |> where(project_id: ^project_id)
+    |> order_by(desc: :inserted_at)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
   @doc """
   Called at boot: sessions left `starting`, `running` or `waiting` by a
   previous run can no longer be attached to, so they are marked failed.
@@ -83,6 +92,7 @@ defmodule Khymeia.Sessions do
       id: record.id,
       harness: String.to_existing_atom(record.harness),
       workspace: record.workspace,
+      project_id: record.project_id,
       prompt: record.prompt,
       model: record.model,
       permission_mode: record.permission_mode,

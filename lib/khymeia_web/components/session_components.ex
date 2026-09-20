@@ -10,6 +10,8 @@ defmodule KhymeiaWeb.SessionComponents do
 
   use Phoenix.Component
 
+  import KhymeiaWeb.CoreComponents, only: [icon: 1]
+
   alias Khymeia.Runtime.Event
 
   use Phoenix.VerifiedRoutes, endpoint: KhymeiaWeb.Endpoint, router: KhymeiaWeb.Router
@@ -33,6 +35,66 @@ defmodule KhymeiaWeb.SessionComponents do
     <span class={"k-status k-status-#{@status}"}>
       <span class="k-dot"></span>{@status}
     </span>
+    """
+  end
+
+  attr :entry, :map, required: true, doc: "a `KhymeiaWeb.WorkEntry`"
+
+  @doc "One piece of work — a session or a workflow run — as a card."
+  def work_card(assigns) do
+    ~H"""
+    <.link navigate={@entry.path} id={"card-#{@entry.id}"} class="k-card">
+      <div class="k-card-head">
+        <.status status={@entry.status} />
+        <.icon
+          :if={@entry.kind == :workflow}
+          name="hero-square-3-stack-3d"
+          class="size-3.5 k-faint"
+        />
+      </div>
+      <p class="k-card-title">{@entry.title}</p>
+      <div class="k-card-meta">
+        <span class="k-tag">{@entry.label}</span>
+        <span :if={@entry.tag} class="k-tag">{@entry.tag}</span>
+        <span :if={@entry.detail} class="k-mono k-faint k-truncate">{@entry.detail}</span>
+      </div>
+      <div class="k-card-foot">
+        <%= if @entry.active? do %>
+          <.elapsed id={"card-elapsed-#{@entry.id}"} since={@entry.started_at} />
+        <% else %>
+          <span class="k-mono k-faint">
+            {format_duration(@entry.started_at, @entry.completed_at)}
+          </span>
+        <% end %>
+      </div>
+    </.link>
+    """
+  end
+
+  attr :entry, :map, required: true
+  attr :id, :string, default: nil
+
+  @doc "The same work as a compact row, for history lists."
+  def work_row(assigns) do
+    ~H"""
+    <.link navigate={@entry.path} id={@id || "row-#{@entry.id}"} class="k-row k-row-session">
+      <span>
+        {@entry.label}
+        <span :if={@entry.tag} class="k-tag">{@entry.tag}</span>
+      </span>
+      <span class="k-truncate">{@entry.title}</span>
+      <span class="k-mono k-faint k-truncate k-hide-sm">{short_path(@entry.workspace)}</span>
+      <.status status={@entry.status} />
+      <span class="k-hide-sm" style="text-align:right">
+        <%= if @entry.active? do %>
+          <.elapsed id={"row-elapsed-#{@entry.id}"} since={@entry.started_at} />
+        <% else %>
+          <span class="k-mono k-muted">
+            {format_duration(@entry.started_at, @entry.completed_at)}
+          </span>
+        <% end %>
+      </span>
+    </.link>
     """
   end
 

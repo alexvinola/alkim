@@ -29,6 +29,7 @@ defmodule KhymeiaWeb.SessionLive do
            harness_name: harness_name(session.harness),
            last_seq: events |> List.last(%{seq: 0}) |> Map.get(:seq),
            has_events: events != [],
+           project: Khymeia.Projects.get(session.project_id),
            message: ""
          )
          |> stream_configure(:events, dom_id: &dom_id/1)
@@ -110,7 +111,7 @@ defmodule KhymeiaWeb.SessionLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} nav={@nav} active={:sessions} project={@project}>
       <div class="k-section-head">
         <div style="min-width:0">
           <h1 class="k-h1 k-truncate">{Session.title(@session)}</h1>

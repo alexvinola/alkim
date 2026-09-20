@@ -375,6 +375,7 @@ defmodule Khymeia.Runtime.SessionServer do
     Map.take(session, [
       :harness,
       :workspace,
+      :project_id,
       :status,
       :started_at,
       :completed_at,

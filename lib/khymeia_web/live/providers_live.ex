@@ -226,7 +226,7 @@ defmodule KhymeiaWeb.ProvidersLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} active={:providers}>
+    <Layouts.app flash={@flash} nav={@nav} active={:providers}>
       <div class="k-section-head">
         <h1 class="k-h1">Providers</h1>
       </div>

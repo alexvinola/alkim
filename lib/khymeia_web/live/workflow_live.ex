@@ -20,7 +20,10 @@ defmodule KhymeiaWeb.WorkflowLive do
 
     case Workflow.get(id) do
       {:ok, run, steps} ->
-        {:ok, socket |> assign(reply: "") |> assign_run(run, steps)}
+        {:ok,
+         socket
+         |> assign(reply: "", project: Khymeia.Projects.get(run.project_id))
+         |> assign_run(run, steps)}
 
       :error ->
         {:ok, socket |> put_flash(:error, "Workflow not found") |> push_navigate(to: ~p"/")}
@@ -97,7 +100,7 @@ defmodule KhymeiaWeb.WorkflowLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} nav={@nav} active={:sessions} project={@project}>
       <div class="k-section-head">
         <div style="min-width:0">
           <span class="k-h2">Workflow · {@run.title || @run.name}</span>

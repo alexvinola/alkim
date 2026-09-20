@@ -13,7 +13,11 @@ defmodule KhymeiaWeb.Router do
   scope "/", KhymeiaWeb do
     pipe_through :browser
 
-    live "/", DashboardLive
+    live "/", ProjectsLive
+    live "/projects", ProjectsLive
+    live "/projects/:id", ProjectLive
+    live "/projects/:id/:tab", ProjectLive
+    live "/sessions", SessionsLive
     live "/sessions/new", SessionNewLive
     live "/sessions/:id", SessionLive
     live "/workflows/new", WorkflowNewLive

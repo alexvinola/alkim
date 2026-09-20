@@ -54,10 +54,14 @@ defmodule Khymeia.Runtime do
             })
         end
 
+      project = Khymeia.Projects.ensure_for_workspace(params.workspace)
+      Khymeia.Projects.touch(project)
+
       session = %Session{
         id: Ecto.UUID.generate(),
         harness: harness.id,
         workspace: params.workspace,
+        project_id: project && project.id,
         prompt: params.prompt,
         model: params.model,
         permission_mode: params.permission_mode,
@@ -156,8 +160,13 @@ defmodule Khymeia.Runtime do
   def list_live do
     Registry.list()
     |> Enum.map(fn {id, pid, summary} -> Map.merge(summary, %{id: id, pid: pid}) end)
-    |> Enum.sort_by(& &1.started_at, {:desc, DateTime})
+    |> Enum.sort_by(&started_at/1, {:desc, DateTime})
   end
+
+  # A session that has not started yet was created a moment ago, so it
+  # belongs at the top rather than crashing the sort with a nil.
+  defp started_at(%{started_at: nil}), do: DateTime.utc_now()
+  defp started_at(%{started_at: at}), do: at
 
   @doc """
   Distinct workspaces used recently by sessions and workflows, newest first,
@@ -188,6 +197,10 @@ defmodule Khymeia.Runtime do
 
   @doc "Recently recorded sessions, newest first."
   def list_recent(limit \\ 20), do: Enum.map(Sessions.list_recent(limit), &Sessions.to_session/1)
+
+  @doc "Recently recorded sessions of one project, newest first."
+  def list_recent_for_project(project_id, limit \\ 20),
+    do: Enum.map(Sessions.list_for_project(project_id, limit), &Sessions.to_session/1)
 
   defdelegate subscribe_sessions, to: EventBus
   defdelegate subscribe_session(id), to: EventBus

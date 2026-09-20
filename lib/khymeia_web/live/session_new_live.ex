@@ -18,13 +18,13 @@ defmodule KhymeiaWeb.SessionNewLive do
   alias KhymeiaWeb.HarnessOptions
 
   @impl true
-  def mount(_params, _session, socket) do
-    harnesses = Runtime.harnesses()
+  def mount(params, _session, socket) do
+    harnesses = socket.assigns.nav.harnesses
     available = Enum.filter(harnesses, &(&1.status == :available))
     options = HarnessOptions.build(harnesses)
 
     params = %{
-      "workspace" => default_workspace(),
+      "workspace" => default_workspace(params["project"]),
       "harness" => HarnessOptions.first_value(options),
       "model" => "",
       "custom_model" => "",
@@ -88,9 +88,12 @@ defmodule KhymeiaWeb.SessionNewLive do
   defp maybe_reset_harness_fields(_old, params),
     do: Map.merge(params, %{"model" => "", "custom_model" => "", "permission_mode" => ""})
 
-  # The last workspace used, else the first allowed root.
-  defp default_workspace do
-    List.first(Runtime.recent_workspaces(1)) || List.first(Khymeia.Workspace.roots())
+  # The project this form was opened from, else the last workspace used.
+  defp default_workspace(project_id) do
+    case Khymeia.Projects.get(project_id) do
+      %{path: path} -> path
+      nil -> List.first(Runtime.recent_workspaces(1)) || List.first(Khymeia.Workspace.roots())
+    end
   end
 
   @impl true
@@ -106,14 +109,14 @@ defmodule KhymeiaWeb.SessionNewLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} active={:new}>
+    <Layouts.app flash={@flash} nav={@nav} active={:new}>
       <div class="k-section-head">
         <h1 class="k-h1">New session</h1>
         <.mode_tabs active={:chat} />
       </div>
 
       <div :if={@available == []} class="k-banner" style="margin-bottom:1.5rem">
-        No supported harness is installed. Install Claude Code or Codex, then rescan from the dashboard.
+        No supported harness is installed. Install Claude Code or Codex, then rescan from the projects page.
       </div>
 
       <.form for={@form} id="new-session" class="k-form" phx-change="change" phx-submit="start">

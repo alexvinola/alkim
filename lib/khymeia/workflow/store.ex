@@ -46,6 +46,14 @@ defmodule Khymeia.Workflow.Store do
     Run |> order_by(desc: :inserted_at) |> limit(^limit) |> Repo.all()
   end
 
+  def list_for_project(project_id, limit \\ 20) do
+    Run
+    |> where(project_id: ^project_id)
+    |> order_by(desc: :inserted_at)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
   @doc """
   Called at boot: runs left active by a previous Khymeia process cannot be
   re-attached to (their harness processes are gone), so they are marked

@@ -2,7 +2,8 @@ defmodule Khymeia.Workflow.PureTest do
   @moduledoc "Definitions, protocol parsing, git snapshots and the timeline — no processes."
   use ExUnit.Case, async: true
 
-  alias Khymeia.Workflow.{AuditResult, Definition, Git, Presets, Protocol, Run, Step, Timeline}
+  alias Khymeia.Git
+  alias Khymeia.Workflow.{AuditResult, Definition, Presets, Protocol, Run, Step, Timeline}
 
   describe "Definition" do
     test "presets are valid and round-trip through their map form" do

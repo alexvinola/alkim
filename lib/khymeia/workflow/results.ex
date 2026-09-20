@@ -3,7 +3,7 @@ defmodule Khymeia.Workflow.StepResult do
   Normalized outcome of an implementer (or consultant) step.
 
   `changed_files` comes from comparing git snapshots of the workspace before
-  and after the step (see `Khymeia.Workflow.Git`); it is `nil` when the
+  and after the step (see `Khymeia.Git`); it is `nil` when the
   workspace is not a git repository — Khymeia does not guess.
   """
   defstruct status: :completed, summary: "", changed_files: nil, metadata: %{}

@@ -47,11 +47,15 @@ defmodule Khymeia.Workflow do
          {:ok, workspace, task} <- workspace_and_task(attrs),
          {:ok, max_iterations} <- max_iterations(attrs, definition),
          {:ok, roles, notes} <- assign_roles(attrs, definition, workspace, task) do
+      project = Khymeia.Projects.ensure_for_workspace(workspace)
+      Khymeia.Projects.touch(project)
+
       run = %Run{
         id: Ecto.UUID.generate(),
         name: definition.name,
         title: definition.title,
         workspace: workspace,
+        project_id: project && project.id,
         task: task,
         constraints: blank_to_nil(attrs["constraints"]),
         status: :pending,
@@ -108,6 +112,10 @@ defmodule Khymeia.Workflow do
   end
 
   def list_recent(limit \\ 20), do: Store.list_recent(limit)
+
+  @doc "Recent runs of one project, newest first."
+  def list_recent_for_project(project_id, limit \\ 20),
+    do: Store.list_for_project(project_id, limit)
 
   @doc "Whether a run still has a live process."
   def alive?(id), do: Registry.lookup(Khymeia.Workflow.Registry, id) != []

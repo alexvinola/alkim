@@ -17,13 +17,13 @@ defmodule KhymeiaWeb.WorkflowNewLive do
   alias Khymeia.Workflow.{Definition, Presets, Role}
 
   @impl true
-  def mount(_params, _session, socket) do
-    harnesses = Enum.filter(Runtime.harnesses(), &(&1.status == :available))
+  def mount(params, _session, socket) do
+    harnesses = Enum.filter(socket.assigns.nav.harnesses, &(&1.status == :available))
     options = Enum.reject(KhymeiaWeb.HarnessOptions.build(harnesses), & &1.disabled)
     preset = hd(Enum.filter(Presets.all(), &(&1.name == "coding-with-audit")) ++ Presets.all())
 
     params = %{
-      "workspace" => default_workspace(),
+      "workspace" => default_workspace(params["project"]),
       "workflow" => preset.name,
       "task" => "",
       "constraints" => "",
@@ -122,8 +122,12 @@ defmodule KhymeiaWeb.WorkflowNewLive do
   end
 
   # The last workspace used, else the first allowed root.
-  defp default_workspace do
-    List.first(Runtime.recent_workspaces(1)) || List.first(Khymeia.Workspace.roots())
+  # The project this form was opened from, else the last workspace used.
+  defp default_workspace(project_id) do
+    case Khymeia.Projects.get(project_id) do
+      %{path: path} -> path
+      nil -> List.first(Runtime.recent_workspaces(1)) || List.first(Khymeia.Workspace.roots())
+    end
   end
 
   @impl true
@@ -139,7 +143,7 @@ defmodule KhymeiaWeb.WorkflowNewLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} active={:new}>
+    <Layouts.app flash={@flash} nav={@nav} active={:new}>
       <div class="k-section-head">
         <h1 class="k-h1">New workflow</h1>
         <.mode_tabs active={:workflow} />

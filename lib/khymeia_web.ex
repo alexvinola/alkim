@@ -50,6 +50,8 @@ defmodule KhymeiaWeb do
     quote do
       use Phoenix.LiveView
 
+      on_mount KhymeiaWeb.Nav
+
       unquote(html_helpers())
     end
   end

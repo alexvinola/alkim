@@ -26,11 +26,12 @@ defmodule Khymeia.Workflow.Server do
   alias Khymeia.Runtime.{CrashMonitor, EventBus}
   alias Khymeia.Runtime.Event, as: SessionEvent
 
+  alias Khymeia.Git
+
   alias Khymeia.Workflow.{
     AuditResult,
     Definition,
     Event,
-    Git,
     Prompts,
     Protocol,
     Role,

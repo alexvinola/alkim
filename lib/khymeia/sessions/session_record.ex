@@ -13,6 +13,7 @@ defmodule Khymeia.Sessions.SessionRecord do
   schema "sessions" do
     field :harness, :string
     field :workspace, :string
+    field :project_id, :binary_id
     field :prompt, :string
     field :model, :string
     field :permission_mode, :string
@@ -28,7 +29,7 @@ defmodule Khymeia.Sessions.SessionRecord do
     timestamps()
   end
 
-  @create ~w(id harness workspace prompt model permission_mode status started_at metadata)a
+  @create ~w(id harness workspace project_id prompt model permission_mode status started_at metadata)a
   @update ~w(status harness_ref turns exit_code error metadata started_at completed_at)a
 
   def create_changeset(attrs) do
