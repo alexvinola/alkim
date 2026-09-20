@@ -75,6 +75,9 @@ defmodule Khymeia.Harness.Fake do
   end
 
   @impl true
+  def quit_sequence, do: "exit\n"
+
+  @impl true
   def build_command(turn) do
     scenario = if turn.model in @scenarios, do: turn.model, else: "success"
     delay = Application.get_env(:khymeia, __MODULE__, []) |> Keyword.get(:delay, "0.4")

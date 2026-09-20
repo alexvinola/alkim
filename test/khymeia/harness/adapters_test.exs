@@ -1,5 +1,7 @@
 defmodule Khymeia.Harness.AdaptersTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
+
+  import ExUnit.Callbacks, only: [on_exit: 1]
 
   alias Khymeia.Harness
   alias Khymeia.Harness.{Capabilities, Claude, Codex, Fake}
@@ -11,6 +13,15 @@ defmodule Khymeia.Harness.AdaptersTest do
     model: nil,
     permission_mode: nil,
     resume: nil
+  }
+
+  @interactive %{
+    workspace: "/tmp/ws",
+    executable: "/usr/local/bin/tool",
+    model: nil,
+    permission_mode: nil,
+    resume: nil,
+    session_id: "8d1f1d5e-0b1a-4a52-9f3c-0c2f9a1d7e55"
   }
 
   test "every adapter implements Khymeia.Harness and builds plain argv" do
@@ -42,6 +53,43 @@ defmodule Khymeia.Harness.AdaptersTest do
       assert ["--model", "opus"] == Enum.slice(args, 4, 2)
       assert "--permission-mode" in args and "plan" in args
       assert ["--resume", "abc", "--", _] = Enum.take(args, -4)
+    end
+
+    # Khymeia is often started from an agent's own terminal, which exports a
+    # family of CLAUDE_* variables. Inheriting them makes the harness believe
+    # it is a continuation of that session, and it then behaves — and
+    # persists — differently.
+    test "clears every inherited CLAUDE_* variable" do
+      System.put_env("CLAUDE_CODE_SESSION_ID", "the-session-that-started-khymeia")
+      System.put_env("CLAUDECODE", "1")
+      on_exit(fn -> System.delete_env("CLAUDE_CODE_SESSION_ID") end)
+
+      for {:ok, %{env: env}} <- [
+            Claude.build_command(@turn),
+            Claude.build_interactive(@interactive)
+          ] do
+        assert {"CLAUDE_CODE_SESSION_ID", false} in env
+        assert {"CLAUDECODE", false} in env
+      end
+    end
+
+    test "a provider variable is set, not cleared, even though it starts with CLAUDE" do
+      provider = %{kind: :bedrock, settings: %{"region" => "eu-west-1"}, secret: nil, name: "aws"}
+      {:ok, %{env: env}} = Claude.build_command(Map.put(@turn, :provider, provider))
+
+      assert {"CLAUDE_CODE_USE_BEDROCK", "1"} in env
+      refute {"CLAUDE_CODE_USE_BEDROCK", false} in env
+    end
+
+    test "the interactive launch names the conversation it will create" do
+      {:ok, launch} = Claude.build_interactive(@interactive)
+
+      assert ["--session-id", id] = Enum.take(launch.args, 2)
+      assert launch.harness_ref == id
+
+      {:ok, resumed} = Claude.build_interactive(%{@interactive | resume: "earlier"})
+      assert ["--resume", "earlier"] = Enum.take(resumed.args, 2)
+      assert resumed.harness_ref == "earlier"
     end
 
     test "parses stream-json events" do

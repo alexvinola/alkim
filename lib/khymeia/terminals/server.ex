@@ -32,6 +32,9 @@ defmodule Khymeia.Terminals.Server do
   # nothing to resume" rather than as the terminal being over.
   @resume_grace_ms 8_000
 
+  # How long a harness gets to quit its own way before it is signalled.
+  @quit_grace_ms 6_000
+
   defmodule State do
     @moduledoc false
     defstruct [
@@ -145,8 +148,18 @@ defmodule Khymeia.Terminals.Server do
     {:reply, {state.terminal, replayable(state)}, state}
   end
 
+  # Ask the harness to quit the way it expects, so it keeps its conversation;
+  # signal it only if it will not go.
   def handle_call(:stop, _from, %State{port: port} = state) when is_port(port) do
-    Port.command(port, <<?k>>)
+    case quit_sequence(state.terminal.harness) do
+      nil ->
+        Port.command(port, <<?k>>)
+
+      keys ->
+        Port.command(port, <<?d>> <> keys)
+        Process.send_after(self(), :force_stop, @quit_grace_ms)
+    end
+
     {:reply, :ok, %{state | stopping?: true}}
   end
 
@@ -182,6 +195,11 @@ defmodule Khymeia.Terminals.Server do
   end
 
   def handle_info(:flush, state), do: {:noreply, flush(%{state | flush_timer: nil})}
+
+  def handle_info(:force_stop, %State{port: port} = state) when is_port(port) do
+    Port.command(port, <<?k>>)
+    {:noreply, state}
+  end
 
   def handle_info({:EXIT, port, _reason}, %State{port: port} = state),
     do: {:stop, :normal, %{state | port: nil}}
@@ -311,6 +329,15 @@ defmodule Khymeia.Terminals.Server do
   defp env(launch) do
     for {key, value} <- Map.get(launch, :env, []) do
       {String.to_charlist(key), if(value == false, do: false, else: String.to_charlist(value))}
+    end
+  end
+
+  defp quit_sequence(harness) do
+    with {:ok, adapter} <- Khymeia.Harness.fetch_adapter(harness),
+         true <- function_exported?(adapter, :quit_sequence, 0) do
+      adapter.quit_sequence()
+    else
+      _ -> nil
     end
   end
 

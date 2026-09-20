@@ -20,6 +20,27 @@ defmodule Khymeia.Harness do
 
   alias Khymeia.Harness.Capabilities
 
+  @doc """
+  Environment entries that unset every inherited variable matching
+  `prefixes`, except the ones the adapter is setting itself.
+
+  Khymeia may well be started from inside an agent's own terminal, and that
+  agent exports a whole family of variables — session ids, sockets, tokens,
+  "this is a child session" markers. Inheriting them makes the harness
+  Khymeia starts believe it is a continuation of something else, which
+  changes how it behaves and what it persists. Every session must start from
+  a clean environment.
+  """
+  @spec clear_inherited([String.t()], [{String.t(), term()}]) :: [{String.t(), false}]
+  def clear_inherited(prefixes, keeping \\ []) do
+    kept = MapSet.new(keeping, fn {name, _value} -> name end)
+
+    for {name, _value} <- System.get_env(),
+        Enum.any?(prefixes, &String.starts_with?(name, &1)),
+        not MapSet.member?(kept, name),
+        do: {name, false}
+  end
+
   @type id :: atom()
 
   @type detection :: %{
@@ -116,10 +137,21 @@ defmodule Khymeia.Harness do
   """
   @callback build_interactive(interactive()) :: {:ok, launch()} | {:error, term()}
 
+  @doc """
+  Keystrokes that make the interactive harness quit through its own path,
+  or `nil` when none is known.
+
+  It matters: a harness killed by a signal may lose the conversation it was
+  holding, while quitting its own way saves it. Only implement this with a
+  sequence verified against the real CLI — a wrong one would be typed into
+  the user's prompt.
+  """
+  @callback quit_sequence() :: binary() | nil
+
   @doc "Provider kinds (`Khymeia.Providers.Profile`) this adapter can target."
   @callback provider_kinds() :: [atom()]
 
-  @optional_callbacks list_models: 1, provider_kinds: 0, build_interactive: 1
+  @optional_callbacks list_models: 1, provider_kinds: 0, build_interactive: 1, quit_sequence: 0
 
   @doc "Adapters enabled in this installation (see `config :khymeia, :harness_adapters`)."
   @spec adapters() :: [module()]

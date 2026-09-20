@@ -45,7 +45,7 @@ Early and moving fast, but built to be trusted with real work:
 | Projects and shell (sidebar, per-project overview, repository tab) | working |
 | Embedded terminals (the harness's own TUI on a real pty) | working; verified end to end with the Claude Code TUI, including a model exchange |
 | Terminal output saved to disk | working; survives restarting the daemon |
-| Resuming a conversation from an embedded terminal | **not working yet** with Claude Code — see [Terminals](#terminals); reopening always gives a usable terminal |
+| Resuming a conversation from an embedded terminal | working; verified with Claude Code (exchange → `/exit` → reopen → history intact) |
 | Test suite | 141 tests, no agent CLI required ([CI](.github/workflows/ci.yml)) |
 | Packaging | OTP release works; Homebrew formula pending |
 
@@ -148,21 +148,31 @@ continue where it left off, and you type. It is the same terminal — same id,
 same saved output — because a terminal *is* the conversation as far as the
 user is concerned.
 
+Verified end to end against Claude Code 2.1.212: an exchange, `/exit`, reopen,
+and the previous exchange is there. Khymeia names the conversation itself with
+`--session-id <uuid>` and reopens it with `--resume`. Codex accepts no
+caller-chosen id, so it resumes with its own `resume --last` for that
+workspace; that path is not yet exercised.
+
 When the harness cannot continue (it says so and exits at once), Khymeia
 prints a line saying so and starts a fresh one in the same place, rather than
 handing back a terminal that died on arrival. A stop you asked for, or a
 harness killed by a signal, never triggers that.
 
-**What could not be made to work** against Claude Code 2.1.212: after a real
-exchange in an embedded terminal, no conversation file appeared under
-`~/.claude/projects/…`, and resuming that id found nothing to restore. This
-held whether the terminal ended with *Stop* (the CLI exits on `SIGTERM` in
-about half a second), with Ctrl-C twice from inside the TUI, or after waiting
-twenty seconds in case the write was deferred. `--session-id <uuid>` *is*
-accepted — it creates `~/.claude/session-env/<uuid>` — so Khymeia names the
-conversation correctly; where the interactive CLI persists one is still an
-open question. Codex accepts no caller-chosen id at all, so it resumes with
-its own `resume --last` for that workspace; that path is untested.
+**Stop quits, it does not kill.** A harness ended by a signal loses the
+conversation it was holding — measured, not assumed. So *Stop* first sends the
+harness's own quit sequence (`/exit` for Claude Code, verified) and only
+signals it if it will not go. Adapters without a verified quit sequence are
+signalled directly, and say so rather than having one guessed for them.
+
+**A clean environment matters more than it looks.** Khymeia is often started
+from an agent's own terminal, and Claude Code exports two dozen `CLAUDE_*`
+variables to its subprocesses — session ids, a messaging socket, "child
+session" markers. Inheriting them made the harness Khymeia started behave as a
+continuation of that session and quietly *not persist its conversation at
+all*. Every adapter now clears the inherited variables of its own family
+before spawning, keeping only what it sets itself. This was the whole reason
+resuming appeared not to work.
 
 **What survives, and what does not.** The *conversation* is persisted by the
 harness itself; Khymeia stores its id, workspace and provider profile. The
@@ -482,6 +492,9 @@ trusted local user** and is built to be unreachable by anyone else:
 - **Validated options:** models match a conservative pattern; permission and
   sandbox modes must be ones the adapter declares; provider settings are
   plain values, safe as environment variables and TOML strings.
+- **A clean environment:** a harness starts with the inherited variables of
+  its own family cleared, so a session Khymeia starts is never a continuation
+  of whatever session happened to launch Khymeia.
 - **No stored secrets:** each CLI keeps its own auth; provider credentials
   are referenced, not stored (see [Cloud providers](#cloud-providers)); the
   daemon's own secrets (`SECRET_KEY_BASE`, `RELEASE_COOKIE`, `DATABASE_PATH`)

@@ -112,10 +112,7 @@ defmodule Khymeia.Harness.Claude do
         opt("--resume", turn.resume) ++
         ["--", turn.prompt]
 
-    # Claude Code refuses to start when it believes it is nested inside
-    # another Claude Code session (e.g. Khymeia launched from its terminal).
-    env = [{"CLAUDECODE", false}] ++ provider_env(turn[:provider])
-    {:ok, %{executable: turn.executable, args: args, env: env}}
+    {:ok, %{executable: turn.executable, args: args, env: env(turn[:provider])}}
   end
 
   @doc """
@@ -139,8 +136,26 @@ defmodule Khymeia.Harness.Claude do
         opt("--model", session.model) ++
         opt("--permission-mode", session.permission_mode)
 
-    env = [{"CLAUDECODE", false}] ++ provider_env(session[:provider])
-    {:ok, %{executable: session.executable, args: args, env: env, harness_ref: ref}}
+    {:ok,
+     %{executable: session.executable, args: args, env: env(session[:provider]), harness_ref: ref}}
+  end
+
+  @doc """
+  `/exit`, verified against Claude Code 2.1.212: it quits and the
+  conversation is written to `~/.claude/projects/…`, where `--resume` finds
+  it. Ending the process with a signal instead loses it.
+  """
+  @impl true
+  def quit_sequence, do: "/exit\r"
+
+  # Claude Code exports a whole family of CLAUDE_* variables to its own
+  # subprocesses — session ids, a messaging socket, "child session" markers.
+  # Khymeia is often started from one of its terminals, so every one of them
+  # is cleared: a session it starts must not look like a continuation of the
+  # session that happened to launch Khymeia.
+  defp env(provider) do
+    provider = provider_env(provider)
+    Khymeia.Harness.clear_inherited(["CLAUDE"], provider) ++ provider
   end
 
   # Documented in Claude Code's "Amazon Bedrock", "Microsoft Foundry" and
