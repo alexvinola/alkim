@@ -41,11 +41,25 @@ defmodule AlkimWeb.Layouts do
     <a href="#main-content" class="a-skip-link">Skip to content</a>
     <div class="a-app">
       <header class="a-topbar">
-        <.link navigate={~p"/"} class="a-brand" aria-label="Alkim home">
-          <img src={~p"/images/alkim-mark-180.png"} alt="" class="a-brand-mark" />
-          <span>alkim<span class="a-brand-period">.</span></span>
-          <span class="a-brand-tag">LOCAL</span>
-        </.link>
+        <div class="a-brand-area">
+          <.link navigate={~p"/"} class="a-brand" aria-label="Alkim home">
+            <img src={~p"/images/alkim-mark-180.png"} alt="" class="a-brand-mark" />
+            <span>alkim<span class="a-brand-period">.</span></span>
+          </.link>
+          <button
+            id="sidebar-toggle"
+            class="a-icon-btn a-sidebar-toggle"
+            type="button"
+            aria-label="Toggle navigation"
+            aria-controls="app-sidebar"
+            aria-expanded="true"
+            phx-hook="SidebarToggle"
+            phx-update="ignore"
+            title="Toggle navigation"
+          >
+            <.icon name="panel-left" class="size-5" />
+          </button>
+        </div>
         <div class="a-topbar-context">
           <.icon name="hero-square-3-stack-3d" class="size-4" />
           <span>Workspace</span><span class="a-faint">/</span>
@@ -68,46 +82,55 @@ defmodule AlkimWeb.Layouts do
             <.icon name="hero-sun" class="size-4 a-theme-sun" />
             <.icon name="hero-moon" class="size-4 a-theme-moon" />
           </button>
-          <button
-            id="sidebar-toggle"
-            class="a-icon-btn a-mobile-toggle"
-            type="button"
-            aria-label="Toggle navigation"
-            aria-controls="app-sidebar"
-            aria-expanded="false"
-            phx-click={
-              JS.toggle_class("a-side-open", to: "#app-sidebar")
-              |> JS.toggle_attribute({"aria-expanded", "true", "false"})
-            }
-          >
-            <.icon name="hero-bars-3" class="size-5" />
-          </button>
         </div>
       </header>
+      <button
+        id="sidebar-backdrop"
+        class="a-sidebar-backdrop"
+        type="button"
+        aria-label="Close navigation"
+        tabindex="-1"
+      ></button>
       <div class="a-body">
         <aside class="a-side" id="app-sidebar">
           <nav class="a-side-nav" aria-label="Main">
             <span class="a-eyebrow">Workspace</span>
-            <.link navigate={~p"/"} class="a-nav-link" aria-current={@active == :projects && "page"}>
-              <.icon name="hero-squares-2x2" class="size-4" /> Projects
+            <.link
+              navigate={~p"/"}
+              class="a-nav-link"
+              aria-label="Projects"
+              title="Projects"
+              aria-current={@active == :projects && "page"}
+            >
+              <.icon name="hero-squares-2x2" class="size-4" /><span class="a-nav-label">Projects</span>
               <span class="a-nav-count">{length(@nav.projects)}</span>
             </.link>
             <.link
               navigate={~p"/sessions"}
               class="a-nav-link"
+              aria-label="Sessions"
+              title="Sessions"
               aria-current={@active == :sessions && "page"}
             >
-              <.icon name="hero-command-line" class="size-4" /> Sessions
+              <.icon name="hero-command-line" class="size-4" /><span class="a-nav-label">Sessions</span>
             </.link>
             <.link
               navigate={~p"/providers"}
               class="a-nav-link"
+              aria-label="Providers"
+              title="Providers"
               aria-current={@active == :providers && "page"}
             >
-              <.icon name="hero-server-stack" class="size-4" /> Providers
+              <.icon name="hero-server-stack" class="size-4" /><span class="a-nav-label">Providers</span>
             </.link>
-            <.link navigate={~p"/sessions/new"} id="sidebar-new-session" class="a-btn a-side-create">
-              <.icon name="hero-plus" class="size-4" /> New session
+            <.link
+              navigate={~p"/sessions/new"}
+              id="sidebar-new-session"
+              class="a-btn a-side-create"
+              aria-label="New session"
+              title="New session"
+            >
+              <.icon name="hero-plus" class="size-4" /><span class="a-nav-label">New session</span>
               <.icon name="hero-arrow-up-right" class="size-3.5" />
             </.link>
           </nav>
@@ -129,6 +152,8 @@ defmodule AlkimWeb.Layouts do
                 :for={p <- @nav.projects}
                 navigate={~p"/projects/#{p.id}"}
                 id={"nav-project-#{p.id}"}
+                aria-label={p.name}
+                title={p.name}
                 aria-current={@project && @project.id == p.id && "page"}
                 class={["a-side-item", @project && @project.id == p.id && "a-side-item-on"]}
               >
@@ -143,6 +168,8 @@ defmodule AlkimWeb.Layouts do
                 :for={entry <- @sessions}
                 navigate={entry.path}
                 id={"nav-entry-#{entry.id}"}
+                aria-label={"#{entry.title} · #{entry.status}"}
+                title={"#{entry.title} · #{entry.status}"}
                 class="a-side-entry"
               >
                 <.icon name={kind_icon(entry.kind)} class="size-3.5 a-faint" />

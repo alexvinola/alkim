@@ -1,72 +1,93 @@
-# Alkim
+<p align="center">
+  <img src="priv/static/images/alkim-mark-512.png" alt="Alkim logo" width="112" />
+</p>
 
-[![CI](https://github.com/alexvinola/alkim/actions/workflows/ci.yml/badge.svg)](https://github.com/alexvinola/alkim/actions/workflows/ci.yml)
+<h1 align="center">Alkim</h1>
 
-**A local-first runtime to supervise, coordinate and verify the coding-agent
-harnesses you already have installed** — Claude Code and Codex today, with
-Kiro CLI, GitHub Copilot CLI, OpenCode and Gemini CLI detected and planned.
+<p align="center"><strong>A local workspace for your coding agents.</strong></p>
 
-Alkim runs as a long-lived local daemon. Every agent session is a supervised
-OTP process driving the real CLI; its output streams as events into a Phoenix
-LiveView UI at <http://127.0.0.1:4777>. On top of single sessions,
-**workflows** put several harnesses to work in roles — an *implementer* that
-writes code, an *advisor* it can consult, an independent read-only *auditor*
-whose findings loop back — with a human able to step in at any checkpoint.
+<p align="center">
+  <a href="https://github.com/alexvinola/alkim/actions/workflows/ci.yml"><img src="https://github.com/alexvinola/alkim/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+</p>
 
-Alkim is **not** an LLM, a model provider, a new coding agent or a
-replacement for Claude Code or Codex. It never calls model APIs itself and
-never runs an agent loop of its own: the harnesses do the reasoning, coding and
-tool use; Alkim handles execution, coordination, state, verification and
-observability.
+Run Claude Code and Codex from one place, give parallel tasks their own Git
+worktrees, and follow the work from the first prompt to an independent audit.
+Alkim brings projects, interactive terminals, background sessions and
+multi-agent workflows into a local web interface.
 
----
+Your installed CLIs do the coding. Alkim manages their processes, workspaces,
+coordination and history. You choose the harness and model, answer when an
+agent needs input, review the changes and decide what to merge.
 
-- [Status](#status)
-- [Quick start](#quick-start)
-- [Using Alkim](#using-alkim) — sessions · workflows · cloud providers
-- [Harness adapters](#harness-adapters)
-- [Architecture](#architecture)
-- [Security and trust model](#security-and-trust-model)
-- [Running as a daemon](#running-as-a-daemon)
-- [Configuration](#configuration)
-- [Development](#development)
-- [Roadmap](#roadmap)
-- [Why Elixir](#why-elixir)
+## Why Alkim
+
+Working with several coding agents quickly becomes a coordination problem:
+which terminal belongs to which task, which branch an agent is editing,
+whether it is still running, and who has checked the result. Alkim keeps
+that context attached to the work.
+
+| When you need to… | Alkim provides… |
+|---|---|
+| Keep track of work across repositories | A project dashboard with active work, recent activity and installed harnesses |
+| Use the CLI you already know | Embedded terminals running the harness's real interactive interface, including its slash commands |
+| Run separate tasks in the same repository | Git worktrees with their own directories and branches, plus change summaries |
+| Delegate a task and follow its progress | Background sessions with streamed activity, follow-up messages and stop controls |
+| Get a second agent to review an implementation | Explicit implement → audit → fix workflows, optional advisor consultations and human checkpoints |
+| Find work again | A searchable Sessions view with terminal, session and workflow filters |
+| Use your existing cloud setup | Provider profiles passed to the local CLI, with credentials resolved when it starts work |
+
+**Local-first describes the workspace and runtime.** Alkim runs on your
+machine and stores its records locally. The selected harness still uses its
+configured model backend, which may send prompts and code to a cloud
+provider. Alkim does not call model APIs or run a separate agent loop.
+
+[Quick start](#quick-start) · [Using Alkim](#using-alkim) ·
+[Harness adapters](#harness-adapters) · [Architecture](#architecture) ·
+[Security](#security-and-trust-model) · [Configuration](#configuration) ·
+[Development](#development) · [Roadmap](#roadmap)
 
 ## Status
 
-Early and moving fast, but built to be trusted with real work:
+Alkim is in active development. The current implementation includes:
 
-| Area | State |
-|---|---|
-| Sessions with Claude Code and Codex | working, exercised end to end against the installed CLIs |
-| Workflows (implement → audit → fix loop, advisor, human checkpoints) | working; verified with Claude Code as implementer and auditor on a test repository |
-| Cloud providers (Bedrock, Foundry, Vertex, Azure OpenAI) | implemented from the CLIs' official docs; configuration accepted by the real CLIs, **not yet run against live accounts** |
-| Projects and shell (sidebar, per-project overview, repository tab) | working |
-| Embedded terminals (the harness's own TUI on a real pty) | working; verified end to end with the Claude Code TUI, including a model exchange |
-| Terminal output saved to disk | working; survives restarting the daemon |
-| Git worktree isolation (own directory and branch per piece of work) | working for terminals, sessions and workflow runs; verified on this repository |
-| Resuming a conversation from an embedded terminal | working; verified with Claude Code (exchange → `/exit` → reopen → history intact) |
-| Test suite | 141 tests, no agent CLI required ([CI](.github/workflows/ci.yml)) |
-| Packaging | OTP release works; Homebrew formula pending |
+| Area | Available now | Limits |
+|---|---|---|
+| Claude Code and Codex | Background sessions, streamed events and embedded terminals | Resume and permission behaviour depend on the adapter; see below |
+| Projects and navigation | Overview, Git state, active work, search and type filters | One trusted local user |
+| Worktree isolation | New or existing branches for terminals, sessions and workflows | Work started directly in a shared folder remains shared; no automatic merging |
+| Workflows | Implementer, advisor, independent auditor, bounded fix loops and human checkpoints | An audit verdict is an agent's assessment, not proof that tests passed |
+| Persistence | Session/run records, workflow timelines and bounded terminal output on disk | Live processes stop with the daemon; detailed session activity is held in memory |
+| Cloud profiles | Claude Code: Bedrock, Foundry, Vertex; Codex: Azure OpenAI/Foundry, Bedrock | Configuration plumbing is implemented; end-to-end use with live cloud accounts remains unverified |
+| Distribution | Source checkout and OTP release | Homebrew packaging is pending |
 
-Every integration is checked against the installed CLI's `--help` or its
-official documentation; what could not be verified is said so in this README
-rather than simulated.
+Kiro CLI, GitHub Copilot CLI, OpenCode and Gemini CLI are **detected only**;
+they cannot be launched through Alkim until an adapter is implemented.
 
 ## Quick start
 
-Requirements: Elixir ≥ 1.17 on OTP ≥ 26 (developed on Elixir 1.20.4 /
-OTP 29.1, see [`.tool-versions`](.tool-versions)), macOS or Linux, and a C
-compiler (SQLite is compiled in by `exqlite`).
+Requirements: macOS or Linux, Git, a C compiler, and the Elixir/OTP versions
+in [`.tool-versions`](.tool-versions). The compiler builds SQLite support and
+Alkim's PTY helper. Install and authenticate Claude Code or Codex separately
+to use real agents; the development demo also works without them.
 
 ```bash
+git clone https://github.com/alexvinola/alkim.git
+cd alkim
 mix setup          # deps, database, assets
 mix phx.server
 ```
 
-Open <http://127.0.0.1:4777>. Add the folder you work in as a project; the
-sidebar lists the harnesses Alkim found on your machine.
+Open <http://127.0.0.1:4777>, then:
+
+1. **Add a project** by choosing a folder on your machine.
+2. **Open a terminal** from the project overview and select an available
+   harness. Use its normal interface to work on the project.
+3. **Create a worktree** before starting an independent task in the same
+   repository, then use *Open terminal here*.
+4. For a delegated task, choose **New session**; for an implementation with
+   a separate review, choose **New workflow → Coding + Audit**.
+5. Follow active work from **Projects** or **Sessions**, then inspect the
+   repository or worktree changes before integrating them.
 
 No agent CLI? In development a **Fake harness** is always available, so the
 whole runtime can be tried without one. Choose it in *New session* and pick a
@@ -86,6 +107,30 @@ with `ALKIM_PORT`.
 
 ## Using Alkim
 
+Choose the mode that matches how you want to work:
+
+| Mode | You provide | What runs |
+|---|---|---|
+| Terminal | Interactive input in the CLI | The harness's own TUI on a real pseudo-terminal |
+| Session | A task, model and permission mode | A non-interactive CLI turn with structured activity and follow-ups |
+| Workflow | A task, role assignments and iteration limits | A deterministic sequence of sessions for implementation, advice and review |
+
+All three are tied to a project and can use a worktree. The **Sessions** page
+brings active and recent work together; search by task, harness or workspace,
+or filter by type.
+
+### Projects
+
+A project is a folder you work in. **Overview** shows running and recent work
+and lets you launch a terminal, session or workflow. **Git** shows repository
+state and recent commits; worktree cards show each isolated task's branch
+and change summary.
+
+The interface supports light and dark themes. Collapse the sidebar to an
+icon rail, hover over it to reveal the menu temporarily, or use the button
+beside the logo to keep it open. On desktop and tablet the workspace and
+terminal resize with the menu; small mobile screens use an overlay.
+
 ### Sessions
 
 *New session → Chat*: choose a **workspace**, a **harness** (or one of its
@@ -97,7 +142,7 @@ a prompt.
   roots, and the server re-validates every step.
 - **Model** — only what the CLI itself reports: Codex's catalog from
   `codex debug models`; for Claude Code, the aliases its `--help` documents
-  (`fable`, `opus`, `sonnet`). *Default* leaves the choice to the harness;
+  (parsed from the installed CLI). *Default* leaves the choice to the harness;
   *Other…* accepts any name the CLI takes. Nothing is guessed.
 - **Permissions** — the non-interactive run cannot ask for approval, so this
   decides what the agent may do on its own: Claude Code `plan`,
@@ -108,15 +153,6 @@ A session page streams the activity live. When the harness can resume a
 conversation (both can), a finished turn leaves the session **waiting**:
 reply to continue the same conversation, *Mark done*, or *Stop* it at any
 time.
-
-### Projects
-
-A project is a folder you work in. Its **Overview** is the state of that
-folder — what is running, what ran recently — not a prompt box: work starts by
-opening a terminal, with the headless lanes (session, workflow) one click
-away. **Git** shows what the repository looks like right now. Sessions,
-workflows and terminals all belong to a project, so history stays grouped by
-place.
 
 ### Worktrees
 
@@ -149,116 +185,52 @@ own directory and its own branch, off the current `HEAD`.
   directory beside it falls outside the allowed roots — the form says so and
   does not offer it, rather than failing on submit.
 
-**Alkim never merges.** *Keep branch* removes the directory and leaves the
-branch for you to review, rebase or merge yourself. *Discard* removes both.
-Nothing here writes to your main branch — a tool that quietly integrates agent
-work is a tool you cannot trust with a repository.
-
-### Workflow runs
-
-A run's page is laid out like a project's: a header that does not move, then
-tabs over what the run is made of.
-
-- **Timeline** — everything that happened, merged and in order.
-- **Steps** — the step tree, with advisor consultations nested under the step
-  that asked.
-- **Agents** — the run seen from *inside*: one pane per agent, with its own
-  output, and a picker to switch between them. The implementer opens first
-  and is marked *main*, because it is the one a human talks to. Watching it
-  receive the advisor's answer is the point: you see the agents talking.
-  **Open in the CLI** runs the harness's own interface on that agent's
-  conversation, in the run's worktree — but never while the agent is
-  mid-turn, because two clients on one conversation is how you corrupt it.
-- **Changes** — what the run did in its worktree. A run that works in the
-  project folder says so instead, because there its changes cannot be told
-  apart from anything else happening there.
-- **Roles** — the mapping you chose, and any permission Alkim could not
-  actually enforce.
-
-Agents are grouped by **conversation, not by step**: an implementer that
-implements and then fixes is one agent with two steps, while each audit round
-is a fresh, independent session. The page shows that distinction because it
-is the design.
-
-Status and a human checkpoint stay *above* the tabs. They are what a run
-needs you for, and must never be hidden behind a tab you did not open.
-
-A limitation worth knowing: a session's activity lives in its process, so an
-agent that has finished — an advisor is terminated as soon as it answers —
-has nothing left to replay in its pane. The timeline keeps what it said.
-Persisting activity is the next step for this (see the roadmap).
+**Alkim never merges automatically.** *Keep branch* removes the worktree
+directory and retains the branch; *Discard* removes both. Commit any changes
+you want to retain before releasing a worktree: keeping the branch does not
+save uncommitted or untracked files from the removed directory. Work launched
+in the project folder edits that checkout directly.
 
 ### Terminals
 
-*Project → Terminal* runs the harness's **own interactive interface** inside
-Alkim, on a real pseudo-terminal, in the project's folder. This is the lane
-a human drives, and the point is that Alkim does not reimplement it: model,
-effort, permission mode and every slash command keep working, because it *is*
-the CLI.
+Open a terminal from a project's overview or a worktree card. The terminal
+runs the harness's **own interactive interface** on a real pseudo-terminal.
+Its model controls, permission prompts and slash commands stay with the CLI.
+Alkim manages the process, the working directory and saved output.
 
-Alkim owns the process, not the interface:
+- Closing the browser leaves the process running while Alkim is running.
+- The terminal adjusts its rows and columns when the pane resizes, including
+  when the sidebar opens or closes.
+- Output is saved as it arrives. Each log is bounded to 1 MB, with `0700`
+  directory permissions and `0600` file permissions. **Delete** removes both
+  the terminal record and its saved output.
+- Opening a stopped terminal starts the harness again and asks it to resume
+  the conversation, keeping the same Alkim terminal record.
+- **Stop** uses the adapter's quit sequence where one is defined, then falls
+  back to signals. Claude Code's adapter sends `/exit` first.
 
-- the runtime spawns `priv/bin/alkim-pty`, a small C helper that holds the
-  pseudo-terminal (the BEAM cannot allocate or resize one) and relays it with
-  Erlang's `{packet, 4}` framing;
-- closing the helper's stdin kills the harness, so nothing outlives Alkim —
-  verified down to `kill -9` on the whole daemon;
-- **output is written to disk as it happens**, so a terminal can be reopened
-  and read after Alkim itself restarted, not just after the browser closed;
-- the browser's window size drives `TIOCSWINSZ`, so the TUI lays itself out
-  for what you can actually see.
+There are three kinds of state, with different lifetimes:
 
-**Saved output is the one place Alkim keeps raw harness output**, and a
-terminal shows whatever appeared on screen. So the directory is `0700`, each
-log is `0600` and capped at 1 MB, and *Delete* removes a terminal together
-with everything it printed. Set `:terminal_log_dir` to move them elsewhere.
+| State | Owner | After Alkim restarts |
+|---|---|---|
+| Conversation | The harness | Resumable through the CLI when supported and persisted |
+| Terminal output | Alkim's bounded disk log | Saved output remains available |
+| Live process | Alkim's supervised PTY helper | Stops with Alkim; reopening starts a new process |
 
-**Alkim names the conversation, in both lanes.** Claude Code accepts
-`--session-id <uuid>` with `-p` as well as interactively — verified: a
-headless run writes `<uuid>.jsonl`. So a workflow agent driven headlessly can
-later be opened in the real CLI with `--resume <uuid>`, because Alkim chose
-the id rather than learning one the harness picked.
+**Resume differs by harness.** Claude Code uses a conversation UUID chosen
+by Alkim and reopens it with `--resume`; this path has been exercised end to
+end. Codex uses a known conversation ID when available, otherwise
+`resume --last` in the workspace. The latter may select another conversation
+in that folder and remains unverified end to end.
 
-**Continuing a conversation.** There is no separate "resume" step: opening a
-terminal that is not running puts a process back on it, asking the harness to
-continue where it left off, and you type. It is the same terminal — same id,
-same saved output — because a terminal *is* the conversation as far as the
-user is concerned.
+If a resume attempt exits immediately with a failure, Alkim can report the
+failure and start a fresh conversation in the same workspace. A user-requested
+stop or a signal termination does not trigger this fallback.
 
-Verified end to end against Claude Code 2.1.212: an exchange, `/exit`, reopen,
-and the previous exchange is there. Alkim names the conversation itself with
-`--session-id <uuid>` and reopens it with `--resume`. Codex accepts no
-caller-chosen id, so it resumes with its own `resume --last` for that
-workspace; that path is not yet exercised.
-
-When the harness cannot continue (it says so and exits at once), Alkim
-prints a line saying so and starts a fresh one in the same place, rather than
-handing back a terminal that died on arrival. A stop you asked for, or a
-harness killed by a signal, never triggers that.
-
-**Stop quits, it does not kill.** A harness ended by a signal loses the
-conversation it was holding — measured, not assumed. So *Stop* first sends the
-harness's own quit sequence (`/exit` for Claude Code, verified) and only
-signals it if it will not go. Adapters without a verified quit sequence are
-signalled directly, and say so rather than having one guessed for them.
-
-**A clean environment matters more than it looks.** Alkim is often started
-from an agent's own terminal, and Claude Code exports two dozen `CLAUDE_*`
-variables to its subprocesses — session ids, a messaging socket, "child
-session" markers. Inheriting them made the harness Alkim started behave as a
-continuation of that session and quietly *not persist its conversation at
-all*. Every adapter now clears the inherited variables of its own family
-before spawning, keeping only what it sets itself. This was the whole reason
-resuming appeared not to work.
-
-**What survives, and what does not.** The *conversation* is persisted by the
-harness itself; Alkim stores its id, workspace and provider profile. The
-*scrollback* lives in the terminal's process. The *process* is a child of the
-runtime and dies with it — after a restart Alkim closes the old terminal and
-offers to resume the conversation rather than pretending the process is alive.
-
-Only harnesses whose interactive mode an adapter declares are offered. A
-merely detected CLI gets no invented command line.
+The PTY transport is a small C helper, `priv/bin/alkim-pty`, which relays
+bytes and window-size changes between the CLI and the runtime. Structured
+workflow activity uses the background-session adapter instead of parsing
+the terminal's screen output.
 
 ### Workflows
 
@@ -316,7 +288,8 @@ layer:
 Advisor requests pass an explicit, deterministic policy (`max_calls`,
 `allowed_reasons`); the answer — or the reason it was refused — goes back
 into the implementer's conversation. An audit without a readable verdict is
-**never** taken as a pass.
+**never** taken as a pass. A readable PASS is still the auditor's assessment:
+Alkim does not yet run a separate repository-defined verification pipeline.
 
 **Human checkpoints.** A run never loops or guesses on its own; it waits,
 with a reason and the matching action:
@@ -353,6 +326,40 @@ advisor: {max_calls: 3, allowed_reasons: [architecture, security, unclear_requir
 
 One *iteration* is one pass over the steps; each `repeat` starts a new one.
 
+### Workflow runs
+
+A run's page is laid out like a project's: a header that does not move, then
+tabs over what the run is made of.
+
+- **Timeline** — everything that happened, merged and in order.
+- **Steps** — the step tree, with advisor consultations nested under the step
+  that asked.
+- **Agents** — the run seen from *inside*: one pane per agent, with its own
+  output, and a picker to switch between them. The implementer opens first
+  and is marked *main*, because it is the one a human talks to. Watching it
+  receive the advisor's answer is the point: you see the agents talking.
+  **Open in the CLI** runs the harness's own interface on that agent's
+  conversation, in the run's worktree — but never while the agent is
+  mid-turn, because two clients on one conversation is how you corrupt it.
+- **Changes** — what the run did in its worktree. A run that works in the
+  project folder says so instead, because there its changes cannot be told
+  apart from anything else happening there.
+- **Roles** — the mapping you chose, and any permission Alkim could not
+  actually enforce.
+
+Agents are grouped by **conversation, not by step**: an implementer that
+implements and then fixes is one agent with two steps, while each audit round
+is a fresh, independent session. The page shows that distinction because it
+is the design.
+
+Status and a human checkpoint stay *above* the tabs. They are what a run
+needs you for, and must never be hidden behind a tab you did not open.
+
+A limitation worth knowing: a session's activity lives in its process, so an
+agent that has finished — an advisor is terminated as soon as it answers —
+has nothing left to replay in its pane. The timeline keeps what it said.
+Persisting activity is the next step for this (see the roadmap).
+
 ### Cloud providers
 
 A **provider profile** runs an installed harness against your own cloud
@@ -366,7 +373,7 @@ configuration each CLI documents:
 | Claude Code → Amazon Bedrock | `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, AWS profile / access keys / Bedrock API key, optional `ANTHROPIC_BEDROCK_BASE_URL` |
 | Claude Code → Microsoft Foundry | `CLAUDE_CODE_USE_FOUNDRY=1`, `ANTHROPIC_FOUNDRY_RESOURCE` or `…_BASE_URL`, API key or Entra ID (`az login`) |
 | Claude Code → Google Vertex AI | `CLAUDE_CODE_USE_VERTEX=1`, `ANTHROPIC_VERTEX_PROJECT_ID`, `CLOUD_ML_REGION`, Application Default Credentials |
-| Codex → Azure OpenAI / Foundry | `-c model_provider=…` with the v1 endpoint (`…/openai/v1`, `wire_api = "responses"`); API key (Codex has no Entra ID support) |
+| Codex → Azure OpenAI / Foundry | `-c model_provider=…` with the v1 endpoint (`…/openai/v1`, `wire_api = "responses"`); API key through Alkim's adapter |
 | Codex → Amazon Bedrock | built-in `amazon-bedrock` provider (`aws.region`, `aws.profile`) or access keys |
 
 Codex is configured with `-c` overrides, so your `~/.codex/config.toml` is
@@ -377,8 +384,9 @@ identifiers (Bedrock model/inference-profile IDs or ARNs, Foundry/Azure
 deployment names); a profile can carry a default, and Foundry and Codex
 profiles need one.
 
-**Credentials are never stored by Alkim.** A profile records only *how* to
-obtain one:
+**Provider profiles store credential references, not secret values.**
+Credentials entered through Alkim can be stored in macOS Keychain. A profile
+records how to obtain them:
 
 | Source | Details |
 |---|---|
@@ -387,10 +395,11 @@ obtain one:
 | macOS Keychain — API key | pasted once, written to the Keychain (service `alkim`) through `security -i` on stdin, so it never appears in any process's arguments |
 | macOS Keychain — AWS access keys | access key ID, secret and optional session token entered in a form instead of editing `~/.aws/credentials` |
 
-Stored credentials are read when each turn starts (so rotation needs no
-restart), handed only to the harness process environment, and never reach
-the database, events, logs or the UI. *Forget credential* removes them at
-any time. When a profile names an AWS profile, inherited
+Stored credentials are resolved when work starts and passed to the harness
+process environment. Profile records do not contain their values. Terminal
+logs capture what a harness prints, so they can contain sensitive output.
+*Forget credential* deletes the credential stored in Keychain; **Delete** on
+a terminal removes its saved output. When a profile names an AWS profile, inherited
 `AWS_ACCESS_KEY_ID` / `AWS_BEARER_TOKEN_BEDROCK` variables are cleared for
 that process — the AWS SDK would otherwise prefer them and silently use
 another account.
@@ -432,6 +441,8 @@ owns the OS process:
 @callback parse_output(:stdout | :stderr, line :: String.t()) :: [event]
 @callback list_models(executable) :: {:ok, [model]} | :error   # optional
 @callback provider_kinds() :: [atom()]                          # optional
+@callback build_interactive(session) :: {:ok, launch} | {:error, term} # optional
+@callback quit_sequence() :: binary() | nil                     # optional
 ```
 
 `Capabilities` declares streaming, structured output, resume, stop, model
@@ -448,12 +459,17 @@ declares.
 - Codex refuses to run outside a Git repository; Alkim does not pass
   `--skip-git-repo-check`.
 - Follow-up messages go between turns, not during a running turn.
-- *Stop* sends SIGTERM to the harness (SIGKILL after 5 s); well-behaved CLIs
-  clean up their own subprocesses.
+- In background sessions, *Stop* signals the harness. Interactive terminals
+  use an adapter-defined quit sequence when available, then fall back to
+  signals if needed.
 - Activity logs live in memory (last 2 000 events, kept 30 minutes after a
   session ends); session and workflow history is persisted.
-- Concurrent sessions on the same workspace are not isolated from each other
-  yet — see the [roadmap](#roadmap).
+- Concurrent work in the same directory shares files. Use separate
+  [worktrees](#worktrees) for independent tasks. Worktrees separate checkouts;
+  the harness's permission mode controls what an agent may access.
+- Codex terminal resume falls back to `resume --last` when Alkim has no
+  conversation ID. That selects the latest conversation in the workspace,
+  which may differ from the terminal you intended to continue.
 
 **Adding an adapter:** implement `Alkim.Harness` in
 `lib/alkim/harness/<name>.ex`, add it to `config :alkim,
@@ -484,6 +500,11 @@ installed CLI's `--help` or its official docs.
 
    events ──► EventBus (Phoenix.PubSub) ──► LiveViews     no polling
    state  ──► SQLite (Ecto)                                history, workflows, profiles
+
+   Alkim.Terminals ──► Terminals.Server ──► priv/bin/alkim-pty ──► CLI TUI
+                              │                         ▲
+                              ├──► bounded disk log     │ resize + keyboard input
+                              └──► LiveView / xterm.js ─┘
 ```
 
 ### Supervision tree
@@ -572,8 +593,8 @@ trusted local user** and is built to be unreachable by anyone else:
 - **A clean environment:** a harness starts with the inherited variables of
   its own family cleared, so a session Alkim starts is never a continuation
   of whatever session happened to launch Alkim.
-- **No stored secrets:** each CLI keeps its own auth; provider credentials
-  are referenced, not stored (see [Cloud providers](#cloud-providers)); the
+- **Credential references:** each CLI keeps its own auth; provider profiles
+  refer to environment, ambient or Keychain credentials (see [Cloud providers](#cloud-providers)); the
   daemon's own secrets (`SECRET_KEY_BASE`, `RELEASE_COOKIE`, `DATABASE_PATH`)
   are removed from every harness environment.
 - **No orphans:** both spawn paths terminate the harness when their port
@@ -601,7 +622,8 @@ _build/prod/rel/alkim/bin/alkim start     # foreground; `daemon` to background
 
 A release needs no configuration: it migrates its database on boot and keeps
 its data — including a generated cookie-signing secret (`0600`) — in
-`~/Library/Application Support/Alkim` (macOS) or `$XDG_DATA_HOME/alkim`.
+`~/Library/Application Support/Alkim` (macOS), or `$XDG_DATA_HOME/alkim`
+with `~/.local/share/alkim` as the Linux fallback.
 
 A daemon does not inherit your shell's `PATH`, so discovery also searches
 `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.npm-global/bin`,
@@ -625,13 +647,15 @@ extended `PATH` (Node-based CLIs need to find `node`).
 
 Application settings (`config/config.exs`): `harness_adapters`,
 `turn_timeout`, `session_retention_ms`, `max_sessions`, `max_workflows`,
-`workflow_tiers`.
+`workflow_tiers`. Set `:terminal_log_dir` to override the terminal log
+directory (by default, `terminal-logs` beside the database).
 
 ## Development
 
 ```bash
-mix test         # 141 tests; no agent CLI needed (fake harness, in-memory secrets)
+mix test         # fake harness and in-memory secrets; no agent CLI needed
 mix precommit    # compile --warnings-as-errors, unused deps, format, test
+mix assets.build # rebuild CSS and JavaScript
 ```
 
 [CI](.github/workflows/ci.yml) runs the same checks on every push and pull
@@ -643,17 +667,20 @@ request, with the versions in `.tool-versions`.
   workflows, provider plumbing.
 - **Tests never touch your Keychain** (`Alkim.MemorySecrets`) and never run
   a real agent CLI.
-- **Probing real CLIs** is done by hand and kept cost-free: tiny prompts,
-  unreachable endpoints, documented example credentials.
+- **Real CLI and cloud checks** are separate manual integrations. Agent
+  prompts can incur charges through the configured provider.
 - Commits follow Conventional Commits: `type(scope): summary`.
 
 ```text
 lib/alkim/
-  runtime.ex  workflow.ex  providers.ex      public APIs
-  projects.ex git.ex                          projects and repository state
+  runtime.ex workflow.ex terminals.ex       execution APIs
+  projects.ex worktrees.ex git.ex           projects, isolation and repository state
+  providers.ex                             provider profiles
   runtime/     supervisors, session server, registry, crash monitor, event bus, OS process
   harness/     behaviour helpers, discovery, adapters (claude, codex, fake)
-  workflow/    server, definition, presets, roles, protocol, prompts, git, timeline, store
+  workflow/    server, definition, presets, roles, protocol, prompts, timeline, store
+  terminals/   PTY server, terminal records and bounded output logs
+  worktrees/   worktree schema
   providers/   profile schema, secrets behaviour, Keychain backend
   sessions/    session history (Ecto)
   projects/    project schema
@@ -664,125 +691,38 @@ lib/alkim_web/
   components/  layouts (shell), session components, workspace picker
   nav.ex       sidebar state, mounted as a hook on every LiveView
   plugs/       loopback-only guard
-priv/bin/      alkim-exec (process wrapper), alkim-fake-harness
+assets/        UI styles, sidebar interactions and terminal hooks
+c_src/         PTY helper source
+priv/bin/      alkim-exec, alkim-fake-harness, compiled alkim-pty
 ```
 
 ## Roadmap
 
-The aim is a local tool that makes working with several coding agents feel
-controlled, observable and safe. Alkim should stay focused: sessions,
-isolated work, reviewable changes and explicit coordination rather than
-becoming a general-purpose development platform. In order:
+Projects, embedded terminals, worktree isolation, provider profiles and the
+implement/audit loop are implemented. The next work is about making that
+foundation more complete:
 
-1. **Consolidate the runtime** — CI, packaging and real day-to-day use with
-   Claude Code and Codex to collect friction before expanding the surface
-   area. Finish the Homebrew distribution path and keep every integration
-   verified against the real installed CLI.
+- **Distribution and everyday reliability:** finish Homebrew packaging and
+  exercise the runtime with real Claude Code and Codex workloads.
+- **Durable activity and recovery:** persist detailed session events beyond
+  the in-memory window and improve interrupted-conversation recovery.
+- **Changes and verification:** add file-level diff browsing, clearer
+  attribution to workflow steps, and explicit test/build results alongside
+  agent review verdicts.
+- **Interactive continuity:** improve terminal resume coverage and the
+  transition between background work and taking over in the CLI.
+- **More adapters:** implement the detected CLIs only after their execution,
+  permissions and resume behaviour are understood and tested.
+- **Workflow definitions:** expose reusable definitions and additional roles
+  while keeping conditions, iteration limits and human decisions explicit.
+- **Cross-harness handoff:** pass a task's objective, changes and remaining
+  work to a new harness conversation without treating native conversation
+  IDs as portable.
 
-2. **Worktree isolation** — *landed* (see [Worktrees](#worktrees)): own
-   directory, own branch, base branch and commit, changed files with
-   insertions and deletions, commits created, and explicit **keep** and
-   **discard**, for terminals, sessions and workflow runs alike. Alkim
-   never merges agent work automatically.
-
-3. **Embedded terminal as the primary way to work** — run the harness's own
-   interactive interface inside Alkim, in the session's worktree and with
-   its provider profile, instead of rebuilding its controls. Model, effort,
-   permission mode, `/compact`, `/context` all keep working, because it is the
-   real CLI; Alkim owns and supervises the process, it does not replace the
-   interface.
-
-   Verified against the installed CLIs, and what makes this cheap:
-
-   - Claude Code accepts `--session-id <uuid>`, so Alkim picks the
-     conversation id up front, for interactive and headless runs alike
-     (confirmed: the interactive CLI creates `~/.claude/session-env/<uuid>`);
-   - `--no-session-persistence` only works with `--print`. That says
-     interactive sessions are meant to be saved, but in practice a
-     conversation held in an embedded terminal could not be resumed
-     afterwards — the open question this phase still has to answer;
-   - Codex offers `resume <SESSION_ID>`, `fork`, and
-     `queue --thread <id> --message <text>` to inject a message into a live
-     session.
-
-   A session therefore moves between the interactive lane and the headless one
-   without losing the conversation — **take over** and **hand back**, never
-   both at once. Structured events stay the job of the headless lane: a PTY
-   carries bytes, not events, and audit loops cannot be built on terminal
-   output.
-
-   "State survives" means three separate things, and only two are free: the
-   *conversation* (the CLI persists it; Alkim stores id, worktree and
-   profile), the *scrollback* (a bounded output buffer replayed on reattach)
-   and the *live process* (a child of the runtime dies with it — recovery is
-   relaunching with `--resume`, not keeping the process alive).
-
-   To be settled by a short spike before any code is written: a PTY helper
-   with window resizing (the BEAM has no PTY of its own); whether
-   `codex app-server` removes the need for a PTY on the Codex side; and
-   whether Claude Code hooks fire during interactive sessions and can keep the
-   timeline alive while the user types.
-
-4. **First-class changes and diffs** — make git state part of the session
-   rather than a hidden implementation detail, so a session answers one
-   question immediately: *what did this agent change?* Change counts on
-   session cards, file-by-file diffs, a cumulative diff against the session's
-   base commit, changes attributed to individual workflow steps, branch and
-   worktree status, and opening the worktree in a terminal or editor. Workflow
-   runs show both the total result and the changes introduced by individual
-   implement/fix steps.
-
-5. **Project and session workspace** — make active work the main view of
-   Alkim. The shell (projects, sidebar, per-project overview, repository
-   tab) is in place; what remains depends on worktrees and diffs. A repository
-   should show its running, waiting and completed sessions together with their
-   harness, branch, worktree, change summary and current state, with multiple
-   agents visible side by side without reasoning about their processes.
-
-6. **More harness adapters** — Gemini CLI next, then GitHub Copilot CLI, Kiro
-   CLI and OpenCode, where their non-interactive and resume behaviour can be
-   verified reliably. Detection alone is not integration: every adapter must
-   document its actual capabilities, permissions, resume semantics and
-   limitations.
-
-7. **Continuity and session history** — persist activity beyond the current
-   in-memory event window and make interrupted work recoverable when the
-   harness supports it: persisted activity timelines, conversation
-   identifiers, interrupted-session recovery, usage and cost where the harness
-   exposes it, and durable branch/worktree metadata.
-
-8. **Cross-harness handoff** — allow a task to continue in another harness
-   without pretending native conversation identifiers are portable between
-   providers. A handoff creates a new session with explicit context derived
-   from the current work — original task, current objective, worktree and
-   branch, changed files and diff, completed work, relevant previous output,
-   open questions, verification state — and the receiving harness starts a new
-   native conversation over the same controlled workspace.
-
-9. **Implementers that verify** — give workflow roles explicit verification
-   capabilities instead of trusting completion claims: per-role allowed
-   commands, repository-defined verification commands, tests, linting and
-   build results captured as workflow events, results passed to auditors, and
-   a clear distinction between model claims and checks Alkim actually ran.
-
-10. **Workflow evolution** — keep workflows deterministic while making them
-    more useful: reusable workflow definitions, additional reviewer and
-    planner role kinds, richer but still bounded conditions, step-level diffs
-    and verification, explicit human approval points, and comparison of
-    independent implementations without automatically choosing a winner.
-
-11. **Optional context integration** — let external repository-context tooling
-    prepare or synchronize harness-specific instructions before a session
-    starts, without making Alkim responsible for organisation-wide
-    knowledge.
-
-Deliberately out of scope: a model or agent loop of Alkim's own, direct
-model API calls, automatic task decomposition, autonomous model routing,
-automatic merging, remote execution, multi-user collaboration and
-organisation-wide context platforms.
-
-The developer remains responsible for choosing the harness, reviewing its work
-and deciding what reaches the repository's main branch.
+The scope remains a local, single-user tool for coding-agent execution and
+coordination. Remote execution, multi-user collaboration, automatic merging,
+automatic model selection and a model loop of Alkim's own are outside the
+current scope.
 
 ## Why Elixir
 

@@ -440,6 +440,24 @@ defmodule AlkimWeb.CoreComponents do
   attr :name, :string, required: true
   attr :class, :any, default: "size-4"
 
+  def icon(%{name: "panel-left"} = assigns) do
+    ~H"""
+    <svg
+      class={@class}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.75"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="3" />
+      <path d="M9 3v18" />
+    </svg>
+    """
+  end
+
   def icon(%{name: "hero-" <> _} = assigns) do
     ~H"""
     <span class={[@name, @class]} />

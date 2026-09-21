@@ -26,6 +26,7 @@ import {hooks as colocatedHooks} from "phoenix-colocated/alkim"
 import topbar from "../vendor/topbar"
 import {Terminal} from "../vendor/xterm"
 import {FitAddon} from "../vendor/xterm-addon-fit"
+import {SidebarToggle} from "./sidebar"
 
 // Theme preference is shared across tabs; system colors remain the default.
 const themeMedia = matchMedia("(prefers-color-scheme: dark)")
@@ -45,12 +46,7 @@ window.addEventListener("storage", e => {
   if (e.key === "phx:theme") { savedTheme = e.newValue; applyTheme(savedTheme) }
 })
 themeMedia.addEventListener("change", () => { if (!savedTheme) applyTheme() })
-window.addEventListener("keydown", e => {
-  if (e.key === "Escape") {
-    document.getElementById("app-sidebar")?.classList.remove("a-side-open")
-    document.getElementById("sidebar-toggle")?.setAttribute("aria-expanded", "false")
-  }
-})
+
 
 // Renders the time elapsed since data-since (ISO 8601) and ticks locally.
 // Purely presentational: no requests are made to the runtime.
@@ -162,7 +158,7 @@ const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, Elapsed, EmbeddedTerminal, FollowTail, SubmitOnMetaEnter},
+  hooks: {...colocatedHooks, SidebarToggle, Elapsed, EmbeddedTerminal, FollowTail, SubmitOnMetaEnter},
 })
 
 // Show progress bar on live navigation and form submits
