@@ -146,6 +146,10 @@ defmodule AlkimWeb.SessionNewLive do
         <.mode_tabs active={:chat} />
       </div>
 
+      <div class="a-form-intro">
+        <strong>One agent. A focused task.</strong><br />Choose a workspace and harness, set its permissions, then describe what you want to build.
+      </div>
+
       <div :if={@available == []} class="a-banner" style="margin-bottom:1.5rem">
         No supported harness is installed. Install Claude Code or Codex, then rescan from the projects page.
       </div>

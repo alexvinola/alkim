@@ -209,7 +209,12 @@ defmodule AlkimWeb.ProjectLive do
   end
 
   def handle_event("pick_terminal_harness", %{"terminal" => %{"harness" => harness}}, socket),
-    do: {:noreply, assign(socket, terminal_harness: harness)}
+    do:
+      {:noreply,
+       assign(socket,
+         terminal_harness: harness,
+         terminal_form: to_form(%{"harness" => harness}, as: :terminal)
+       )}
 
   @impl true
   def handle_info({:terminal_status, _terminal}, socket),
@@ -226,6 +231,11 @@ defmodule AlkimWeb.ProjectLive do
 
     assign(socket,
       terminal_options: options,
+      terminal_form:
+        to_form(
+          %{"harness" => socket.assigns.terminal_harness || HarnessOptions.first_value(options)},
+          as: :terminal
+        ),
       terminal_harness: socket.assigns.terminal_harness || HarnessOptions.first_value(options)
     )
   end
@@ -333,9 +343,11 @@ defmodule AlkimWeb.ProjectLive do
     <Layouts.app flash={@flash} nav={@nav} active={:projects} project={@project} sessions={@sidebar}>
       <div class="a-page-head">
         <div class="a-page-title">
-          <.icon name="hero-folder" class="size-5 a-faint" />
-          <h1 class="a-h1">{@project.name}</h1>
-          <span class="a-mono a-faint a-truncate">{short_path(@project.path)}</span>
+          <span class="a-project-symbol"><.icon name="hero-code-bracket" class="size-5" /></span>
+          <div>
+            <h1 class="a-h1">{@project.name}</h1>
+            <p class="a-mono a-faint a-truncate" title={@project.path}>{short_path(@project.path)}</p>
+          </div>
         </div>
         <.link navigate={~p"/workflows/new?project=#{@project.id}"} class="a-btn">
           New workflow
@@ -356,7 +368,7 @@ defmodule AlkimWeb.ProjectLive do
             patch={~p"/projects/#{@project.id}/#{tab}"}
             aria-current={@tab == tab && "page"}
           >
-            {label}
+            <.icon name={tab_icon(tab)} class="size-3.5" /> {label}
           </.link>
         </nav>
 
@@ -371,26 +383,33 @@ defmodule AlkimWeb.ProjectLive do
     """
   end
 
+  defp tab_icon("overview"), do: "hero-squares-2x2"
+  defp tab_icon("terminal"), do: "hero-command-line"
+  defp tab_icon("git"), do: "hero-code-bracket"
+  defp tab_icon("settings"), do: "hero-cog-6-tooth"
+
   defp overview(assigns) do
     ~H"""
     <section class="a-section">
       <div class="a-launcher">
-        <form
+        <div class="a-launcher-copy">
+          <strong>Make your next move.</strong><span class="a-hint">Open an agent's native CLI, right inside your project.</span>
+        </div>
+        <.form
+          for={@terminal_form}
           id="open-terminal"
           phx-submit="open_terminal"
           phx-change="pick_terminal_harness"
           class="a-launcher-form"
         >
-          <.icon name="hero-command-line" class="size-4 a-faint" />
-          <select name="terminal[harness]" class="a-select a-select-inline" id="overview_harness">
-            <option
-              :for={option <- @terminal_options}
-              value={option.value}
-              selected={option.value == @terminal_harness}
-            >
-              {option.label}
-            </option>
-          </select>
+          <.input
+            type="select"
+            field={@terminal_form[:harness]}
+            options={Enum.map(@terminal_options, &{&1.label, &1.value})}
+            class="a-select a-select-inline"
+            id="overview_harness"
+            aria-label="Terminal harness"
+          />
           <button
             type="submit"
             class="a-btn a-btn-primary"
@@ -400,13 +419,18 @@ defmodule AlkimWeb.ProjectLive do
           >
             Open terminal
           </button>
-        </form>
-
-        <span class="a-spacer" style="flex:1"></span>
-
-        <span class="a-hint a-hide-sm">Headless, for automation:</span>
-        <.link navigate={~p"/sessions/new?project=#{@project.id}"} class="a-btn">Session</.link>
-        <.link navigate={~p"/workflows/new?project=#{@project.id}"} class="a-btn">Workflow</.link>
+        </.form>
+        <div class="a-launcher-links">
+          <span class="a-hint">Prefer to delegate a task?</span>
+          <.link navigate={~p"/sessions/new?project=#{@project.id}"} class="a-btn a-btn-ghost"><.icon
+            name="hero-chat-bubble-left-right"
+            class="size-4"
+          /> New session</.link>
+          <.link navigate={~p"/workflows/new?project=#{@project.id}"} class="a-btn a-btn-ghost"><.icon
+            name="hero-square-3-stack-3d"
+            class="size-4"
+          /> New workflow</.link>
+        </div>
       </div>
 
       <p :if={@terminal_options == []} class="a-hint" style="margin-top:.6rem">
@@ -416,7 +440,10 @@ defmodule AlkimWeb.ProjectLive do
 
     <section class="a-section" id="project-active">
       <div class="a-section-head">
-        <h2 class="a-h2">Active <span class="a-badge">{length(@active)}</span></h2>
+        <h2 class="a-h2">
+          <.icon name="hero-bolt" class="size-4 a-faint" /> Active
+          <span class="a-badge">{length(@active)}</span>
+        </h2>
       </div>
       <div :if={@active == []} class="a-panel a-empty">
         Nothing running in this project. Open a terminal to work with an agent directly.
@@ -429,7 +456,8 @@ defmodule AlkimWeb.ProjectLive do
     <section class="a-section" id="project-worktrees">
       <div class="a-section-head">
         <h2 class="a-h2">
-          Worktrees <span :if={@worktrees != []} class="a-badge">{length(@worktrees)}</span>
+          <.icon name="hero-arrow-path-rounded-square" class="size-4 a-faint" /> Worktrees
+          <span :if={@worktrees != []} class="a-badge">{length(@worktrees)}</span>
         </h2>
         <form
           id="create-worktree"
@@ -478,13 +506,12 @@ defmodule AlkimWeb.ProjectLive do
 
         <p class="a-mono a-faint a-truncate">{short_path(worktree.path)}</p>
 
-        <p :if={is_map(work)} class="a-hint">
-          {work.files} file(s) · <span class="a-change-A">+{work.insertions}</span>
-          <span class="a-change-D">−{work.deletions}</span>
-          · {work.commits} commit(s)<span :if={work.untracked > 0}>
-            · {work.untracked} untracked
-          </span>
-        </p>
+        <div :if={is_map(work)} class="a-worktree-metrics">
+          <span>{work.files} files changed</span>
+          <span><span class="a-change-A">+{work.insertions}</span>
+          <span class="a-change-D">−{work.deletions}</span></span>
+          <span>{work.commits} commits</span><span :if={work.untracked > 0}>{work.untracked} untracked</span>
+        </div>
 
         <div :if={Worktrees.Worktree.active?(worktree)} class="a-worktree-actions">
           <button
@@ -520,7 +547,7 @@ defmodule AlkimWeb.ProjectLive do
 
     <section class="a-section" id="project-recent">
       <div class="a-section-head">
-        <h2 class="a-h2">Recent</h2>
+        <h2 class="a-h2"><.icon name="hero-clock" class="size-4 a-faint" /> Recent activity</h2>
       </div>
       <div class="a-panel a-rows">
         <div :if={@recent == []} class="a-empty">Finished work appears here.</div>

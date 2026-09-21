@@ -227,8 +227,14 @@ defmodule AlkimWeb.ProvidersLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} nav={@nav} active={:providers}>
-      <div class="a-section-head">
-        <h1 class="a-h1">Providers</h1>
+      <div class="a-page-head">
+        <div>
+          <span class="a-eyebrow">Configuration / model inference</span><h1 class="a-h1">
+            Providers
+          </h1>
+          <p class="a-page-subtitle">Your harnesses. Your cloud. Your credentials.</p>
+        </div>
+        <span class="a-project-symbol"><.icon name="hero-server-stack" class="size-5" /></span>
       </div>
       <p class="a-muted" style="max-width:48rem;margin:-.25rem 0 1.5rem">
         Run an installed harness against your own cloud: the CLI still runs here, with its agent

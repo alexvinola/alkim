@@ -103,10 +103,17 @@ defmodule AlkimWeb.SessionComponents do
 
   attr :entry, :map, required: true, doc: "a `AlkimWeb.WorkEntry`"
 
+  attr :id, :string, default: nil
+
   @doc "One piece of work — a session or a workflow run — as a card."
   def work_card(assigns) do
     ~H"""
-    <.link navigate={@entry.path} id={"card-#{@entry.id}"} class="a-card">
+    <.link
+      navigate={@entry.path}
+      id={@id || "card-#{@entry.id}"}
+      class="a-card a-work-card"
+      data-status={@entry.status}
+    >
       <div class="a-card-head">
         <.status status={@entry.status} />
         <.icon name={kind_icon(@entry.kind)} class="size-3.5 a-faint" />
@@ -118,7 +125,12 @@ defmodule AlkimWeb.SessionComponents do
         <span :if={@entry.tag} class="a-tag">{@entry.tag}</span>
         <span :if={@entry.detail} class="a-mono a-faint a-truncate">{@entry.detail}</span>
       </div>
+      <div class="a-card-path" title={@entry.workspace}>
+        <.icon name="hero-folder" class="size-3.5 shrink-0 a-faint" />
+        <span class="a-mono a-faint a-truncate">{short_path(@entry.workspace)}</span>
+      </div>
       <div class="a-card-foot">
+        <span class="flex items-center gap-1.5"><.icon name="hero-clock" class="size-3.5" /> Elapsed</span>
         <%= if @entry.active? do %>
           <.elapsed id={"card-elapsed-#{@entry.id}"} since={@entry.started_at} />
         <% else %>
@@ -138,12 +150,17 @@ defmodule AlkimWeb.SessionComponents do
   def work_row(assigns) do
     ~H"""
     <.link navigate={@entry.path} id={@id || "row-#{@entry.id}"} class="a-row a-row-session">
-      <span>
+      <span class="a-row-kind">
+        <.icon name={kind_icon(@entry.kind)} class="size-4 shrink-0" />
         {@entry.label}
-        <span :if={@entry.children > 0} class="a-tag">{@entry.children} agent(s)</span>
-        <span :if={@entry.tag} class="a-tag">{@entry.tag}</span>
       </span>
-      <span class="a-truncate">{@entry.title}</span>
+      <div class="a-row-title">
+        <span class="a-truncate">{@entry.title}</span>
+        <div :if={@entry.children > 0 or @entry.tag} class="a-card-meta">
+          <span :if={@entry.children > 0} class="a-tag">{@entry.children} agent(s)</span>
+          <span :if={@entry.tag} class="a-tag">{@entry.tag}</span>
+        </div>
+      </div>
       <span class="a-mono a-faint a-truncate a-hide-sm">{short_path(@entry.workspace)}</span>
       <.status status={@entry.status} />
       <span class="a-hide-sm" style="text-align:right">
@@ -175,6 +192,7 @@ defmodule AlkimWeb.SessionComponents do
       id={@id}
       class="a-mono a-muted"
       phx-hook="Elapsed"
+      phx-update="ignore"
       data-since={DateTime.to_iso8601(@since)}
       data-until={@until && DateTime.to_iso8601(@until)}
     >

@@ -202,6 +202,11 @@ defmodule Alkim.Terminals do
     end
   end
 
+  @doc "All active terminals, including ones opened before the recent history window."
+  def list_active do
+    Terminal |> where([t], t.status != :exited) |> order_by(desc: :inserted_at) |> Repo.all()
+  end
+
   @doc "Recently opened terminals across every project, newest first."
   def list_recent(limit \\ 20) do
     Terminal |> order_by(desc: :inserted_at) |> limit(^limit) |> Repo.all()

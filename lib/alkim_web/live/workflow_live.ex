@@ -387,6 +387,43 @@ defmodule AlkimWeb.WorkflowLive do
         </div>
       </section>
 
+      <section
+        :if={@top != [] or @pending != []}
+        class="a-section a-execution"
+        id="workflow-execution"
+      >
+        <div class="a-section-head">
+          <h2 class="a-h2">
+            <.icon name="hero-square-3-stack-3d" class="size-4 a-faint" /> Execution path
+          </h2><span class="a-hint">Follow the handoff between agents</span>
+        </div>
+        <div class="a-pipeline">
+          <.link
+            :for={step <- @top}
+            patch={~p"/workflows/#{@run.id}/steps#step-#{step.id}"}
+            id={"execution-#{step.id}"}
+            class="a-pipeline-node"
+            data-status={step.status}
+          >
+            <span class={["a-step-mark", "a-step-#{step.status}"]}>{mark(step.status)}</span>
+            <span class="a-pipeline-copy"><strong>{step_label(step)}</strong><span>{if step.harness,
+              do: harness_name(step.harness),
+              else: "Human checkpoint"}</span></span>
+            <.status status={step.status} />
+          </.link>
+          <div
+            :for={{id, role} <- @pending}
+            id={"execution-pending-#{id}"}
+            class="a-pipeline-node"
+            data-status="pending"
+          >
+            <span class="a-step-mark a-faint">○</span><span class="a-pipeline-copy"><strong>{step_title(
+              id
+            )}</strong><span>{role}</span></span><span class="a-tag">pending</span>
+          </div>
+        </div>
+      </section>
+
       <div class="a-tabs-row">
         <nav class="a-tabs a-tabs-page" aria-label="Workflow">
           <.link

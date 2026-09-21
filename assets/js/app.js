@@ -27,6 +27,31 @@ import topbar from "../vendor/topbar"
 import {Terminal} from "../vendor/xterm"
 import {FitAddon} from "../vendor/xterm-addon-fit"
 
+// Theme preference is shared across tabs; system colors remain the default.
+const themeMedia = matchMedia("(prefers-color-scheme: dark)")
+const applyTheme = theme => {
+  document.documentElement.dataset.theme = theme || (themeMedia.matches ? "dark" : "light")
+  window.dispatchEvent(new Event("alkim:theme-changed"))
+}
+let savedTheme
+try { savedTheme = localStorage.getItem("phx:theme") } catch (_) { /* Storage can be unavailable. */ }
+applyTheme(savedTheme)
+window.addEventListener("alkim:toggle-theme", () => {
+  savedTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark"
+  try { localStorage.setItem("phx:theme", savedTheme) } catch (_) { /* Keep the current tab usable. */ }
+  applyTheme(savedTheme)
+})
+window.addEventListener("storage", e => {
+  if (e.key === "phx:theme") { savedTheme = e.newValue; applyTheme(savedTheme) }
+})
+themeMedia.addEventListener("change", () => { if (!savedTheme) applyTheme() })
+window.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    document.getElementById("app-sidebar")?.classList.remove("a-side-open")
+    document.getElementById("sidebar-toggle")?.setAttribute("aria-expanded", "false")
+  }
+})
+
 // Renders the time elapsed since data-since (ISO 8601) and ticks locally.
 // Purely presentational: no requests are made to the runtime.
 const Elapsed = {
@@ -88,6 +113,12 @@ const EmbeddedTerminal = {
       theme: {background: color("--a-sunken"), foreground: color("--a-text"), cursor: color("--a-accent")},
     })
 
+    this.onThemeChange = () => {
+      const styles = getComputedStyle(document.documentElement)
+      const color = name => styles.getPropertyValue(name).trim()
+      this.term.options.theme = {background: color("--a-sunken"), foreground: color("--a-text"), cursor: color("--a-accent")}
+    }
+    window.addEventListener("alkim:theme-changed", this.onThemeChange)
     this.fit = new FitAddon()
     this.term.loadAddon(this.fit)
     this.term.open(this.el)
@@ -121,6 +152,7 @@ const EmbeddedTerminal = {
   },
 
   destroyed() {
+    window.removeEventListener("alkim:theme-changed", this.onThemeChange)
     this.observer?.disconnect()
     this.term?.dispose()
   },
@@ -134,7 +166,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
 })
 
 // Show progress bar on live navigation and form submits
-topbar.config({barColors: {0: "#1f6f5c"}, shadowColor: "rgba(0, 0, 0, .3)"})
+topbar.config({barColors: {0: "#4ebca5"}, shadowColor: "rgba(0, 0, 0, .3)"})
 window.addEventListener("phx:page-loading-start", _info => topbar.show(300))
 window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 

@@ -2,7 +2,6 @@ defmodule Alkim.ProvidersTest do
   use Alkim.RuntimeCase, async: false
 
   alias Alkim.Providers
-  alias Alkim.Providers.Profile
   alias Alkim.Harness.{Claude, Codex}
 
   @moduletag :capture_log

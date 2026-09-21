@@ -191,6 +191,10 @@ defmodule AlkimWeb.WorkflowNewLive do
         <.mode_tabs active={:workflow} />
       </div>
 
+      <div class="a-form-intro">
+        <strong>Implement → audit → refine.</strong><br />Assign the roles, isolate the work, and follow each step. You stay in control of the result.
+      </div>
+
       <div :if={@harnesses == []} class="a-banner" style="margin-bottom:1.5rem">
         No supported harness is installed.
       </div>
